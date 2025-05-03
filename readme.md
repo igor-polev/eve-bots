@@ -2,7 +2,7 @@
 
 ## Borrowed code
 
-**V4L2 C++ Wrapper** by **Michel Promonet** is included in source code of this project. Full code taken from [github](https://github.com/mpromonet/libv4l2cpp) place inside libv4l2cpp folder.
+**V4L2 C++ Wrapper** by **Michel Promonet** is included in source code of this project. Full code taken from [github](https://github.com/mpromonet/libv4l2cpp) placed inside libv4l2cpp folder.
 
 ## Acknowledgements
 
