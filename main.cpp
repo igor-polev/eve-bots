@@ -1,55 +1,61 @@
+/*
+	EVE Echoes bot for Linux.
+	Author: Igor Polev.
+
+	See usage string below.
+*/
+
 #include <fstream>
 #include <iostream>
-#include "libv4l2cpp/inc/V4l2Capture.h"
+#include <nlohmann/json.hpp>
 
-#define TEST_DEV "/dev/video10"
+#include "androidbot.hpp"
+
+using json = nlohmann::json;
+
+static const char *_usage_str = R"usage(
+Run a bot for EVE Echoes game.
+Requirees scrcpy (https://github.com/Genymobile/scrcpy) to be installed.
+Usage:
+    eve_bot config.json
+)usage";
 
 int main(int argc, char* argv[]) 
 {
-	static const V4L2DeviceParameters v4l2_params {
-		TEST_DEV,
-		V4L2_PIX_FMT_YUV420,
-		592,
-		1280,
-		30,
-		IOTYPE_MMAP
-	};
+	std::cout << "EVE Echoes bot for Linux." << std::endl;
 
-	V4l2Capture* scrcpy_dev = V4l2Capture::create(v4l2_params);
-	if (scrcpy_dev == NULL) {
-		std::cout << "--- Failed to open device " << TEST_DEV << std::endl;
+	// prereqs check
+	auto scrcpy_pipe = popen("iscrcpy --help &> /dev/null", "r");
+	if (0 != std::system("scrcpy --help &> /dev/null")) {
+		std::cout << "scrcpy utility is not found. See usage below." << std::endl;
+		std::cout << _usage_str << std::endl;
 		return -1;
 	}
-	std::cout << "Device " << TEST_DEV << " opened" << std::endl;
-	static unsigned int buff_size = scrcpy_dev->getBufferSize();
-	std::cout << "Buffer size = " << buff_size << " bytes" << std::endl;
-	char *buffer = new char[buff_size];
-	static std::ofstream frame_file;
-	auto file_mode = std::ios::out | std::ios::binary | std::ios::trunc;
-	auto file_ext = '.' + V4l2Device::fourcc(scrcpy_dev->getFormat());
-
-	int i_frame = 0;
-	timeval def_timeout {1, 0};
-	while (scrcpy_dev->isReadable(&def_timeout) && i_frame < 30)
-	{
-		auto byte_count = scrcpy_dev->read(buffer, buff_size);
-		if (byte_count == -1) {
-			std::cout << "-- Error reading from " << TEST_DEV << std::endl;
-			break;
-		}
-		try {
-			frame_file.open("frame_" + std::to_string(i_frame) + file_ext, file_mode);
-			frame_file.write(buffer, buff_size);
-			frame_file.close();
-		}
-		catch (...) {
-			std::cout << "-- Error while saving frames to file" << std::endl;
-			break;
-		}
-		i_frame++;
+	if (argc < 2) {
+		std::cout << "Bad arguments. See usage below." << std::endl;
+		std::cout << _usage_str << std::endl;
+		return -1;
 	}
 
-	delete[] buffer;
-	delete scrcpy_dev;
+	// start bot
+	try {
+		std::ifstream config_file(argv[1]); // first argument must be JSON config file
+		if (!config_file.is_open()) {
+			std::cout << "--- ERROR: faild to open config file '" << argv[1] << "'\n";
+			return -1;
+		}
+		json bot_config = json::parse(config_file);
+		AndroidBot bot(bot_config);
+		bot.run();
+	}
+    catch (const json::parse_error& e) {
+		std::cout << "--- ERROR: failed to parse config file '" << argv[1] << "'\n";
+        std::cout << e.what() << std::endl;
+		return -1;
+    }
+	catch(...) {
+		std::cout << "--- ERROR: unhandles excepition, terminating" << std::endl;
+		return -1;
+	}
 	return 0;
 }
