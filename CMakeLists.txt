@@ -9,7 +9,18 @@ include_directories (libv4l2cpp/inc)
 aux_source_directory(libv4l2cpp/src LIBV4L2CPP_FILES)
 add_library         (libv4l2cpp STATIC ${LIBV4L2CPP_FILES})
 
-include_directories(${PROJECT_SOURCE_DIR}/include)
+# OpenCV image recognition library
+find_package(OpenCV REQUIRED)
 
-add_executable(${PROJECT_NAME} main.cpp)
-target_link_libraries(${PROJECT_NAME} libv4l2cpp)
+# project itself
+include_directories(${PROJECT_SOURCE_DIR}/include)
+aux_source_directory(source CLASSES_FILES)
+
+add_executable(${PROJECT_NAME}
+    main.cpp
+    ${CLASSES_FILES}
+)
+target_link_libraries(${PROJECT_NAME}
+    libv4l2cpp
+    ${OpenCV_LIBS}
+)
