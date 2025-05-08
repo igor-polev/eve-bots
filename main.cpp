@@ -10,6 +10,7 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 
+#include "consolecmd.hpp"
 #include "androidbot.hpp"
 
 using json = nlohmann::json;
@@ -17,7 +18,12 @@ using namespace std;
 
 static const char *_usage_str = R"(
 Run a bot for EVE Echoes game.
-Requirees scrcpy (https://github.com/Genymobile/scrcpy) to be installed.
+Requirements:
+    dkms package;
+    v4l2loopback-dkms kernel module;
+    v4l2loopback-utils package;
+    scrcpy utility.
+    See https://github.com/Genymobile/scrcpy for more details.
 Usage:
     eve_bot <config.json>
 )";
@@ -32,12 +38,35 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 	cout << "Checking prerequisites...\n";
-	if (0 != system("scrcpy --help &> /dev/null")) {
-		cout << "scrcpy utility is not found. See usage below.\n";
+	ConsoleCmd command;
+	string cmd_list[] {
+		"dkms",
+		"v4l2loopback-ctl",
+		"scrcpy",
+		"sudo"
+	};
+	for (string cmd : cmd_list) {
+		command = cmd + " --help";
+		if (!command.available()) {
+			cout << cmd << " is not available. See usage below.\n";
+			cout << _usage_str << endl;
+			return -1;
+		}
+		cout << " - " << cmd << " present\n";
+	}
+	command = "dkms status | grep v4l2loopback";
+	if (!command.has_output()) {
+		cout << " - v4l2loopback kernel module not found. See usage below.\n";
 		cout << _usage_str << endl;
 		return -1;
 	}
-	cout << " - scrcpy utility detected\n";
+	cout << " - v4l2loopback kernel module detected\n";
+	cout << "Validating sudo command...\n";
+	command = "sudo --validate";
+	if (0 != command.execute()) {
+		cout << "--- ERROR: failed to validate sudo command.\n";
+		return -1;
+	}
 
 	// start bot
 	try {

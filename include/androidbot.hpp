@@ -9,52 +9,43 @@
 #include <nlohmann/json.hpp>
 #include "../libv4l2cpp/inc/V4l2Capture.h"
 
-using json = nlohmann::json;
 using namespace std;
-
-#define V4L2_DEFAULT_FPS 30
+using json = nlohmann::json;
 
 class AndroidBot {
 public:
+	static const int v4l2_default_fps {30};
 	enum states {
 		uninitialized,
 		initialized,
 		running,
 		stopped
 	};
-  	AndroidBot() noexcept:
-		m_adb_serial(),
-		m_v4l2_dev_name(),
-		m_v4l2_device(NULL),
-		m_fullres{0,0},
-		m_v4l2_buffer_size(0),
-		m_v4l2_buffer(NULL),
-		m_check_interval(0),
-		m_bot_state(states::uninitialized)
-		{};
-    AndroidBot(const json &settings) {
-		init(settings);
-	};
-	const bool init(const json &settings);
+  	AndroidBot() = delete;
+    AndroidBot(const json &settings);
     virtual ~AndroidBot();
 	virtual int run();
 	const states state() const noexcept {
-		return _bot_state;
+		return m_bot_state;
 	};
 private:
 	struct scr_resolution {
 		unsigned x;
 		unsigned y;
 	};
-	string         m_adb_serial;
-	string         m_v4l2_dev_name;
+	string         m_adb_name;         // user friendly name of Android device
+	string         m_adb_serial;       // serial number of Android device
+	string         m_adb_log;
+	string         m_v4l2_dev_name;    // v4l2 video device path, for ex.: /dev/video7
 	V4l2Capture   *m_v4l2_device;
-	unsigned       m_v4l2_buffer_size;
+	size_t         m_v4l2_buffer_size;
 	char          *m_v4l2_buffer;
-	scr_resolution m_fullres;
-	unsigned       m_check_interval;
+	scr_resolution m_fullres;          // hardware resoluition of Android device
+	scr_resolution m_v4l2res; 
+	int            m_adb_fps;          // user-defined FPS of video stream
+	unsigned       m_check_interval;   // bot screen check interval in milliseconds
 	states         m_bot_state;
-protected:
+private:
 	void adb_process();
 	void getframes_process();
 };

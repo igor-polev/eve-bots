@@ -5,10 +5,14 @@ Run a bot for EVE Echoes game.
 **Usage**:
     eve_bot <config.json>
 
-## System requirements
+## Runtime requirements
+[`dkms`](https://wiki.archlinux.org/title/Dynamic_Kernel_Module_Support) package;
+[`v4l2loopback-dkms`](https://github.com/v4l2loopback/v4l2loopback) kernel module;
+[`v4l2loopback-utils`](https://github.com/v4l2loopback/v4l2loopback) package;
+[`scrcpy`](https://github.com/Genymobile/scrcpy) utility;
+[`sudo`] command (required to setup v4l2loopback devices).
 
-[`scrcpy`](https://github.com/Genymobile/scrcpy) utility must be installed.
-The module `v4l2loopback` must be installed and v4l2loopback device configured properly. See [scrcpy:Video4Linux](https://github.com/Genymobile/scrcpy/blob/master/doc/v4l2.md) for detailes.
+See [scrcpy:Video4Linux](https://github.com/Genymobile/scrcpy/blob/master/doc/v4l2.md) for more details.
 
 ## Build dependencies
 
