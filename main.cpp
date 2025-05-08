@@ -13,6 +13,7 @@
 #include "androidbot.hpp"
 
 using json = nlohmann::json;
+using namespace std;
 
 static const char *_usage_str = R"(
 Run a bot for EVE Echoes game.
@@ -23,53 +24,52 @@ Usage:
 
 int main(int argc, char* argv[]) 
 {
-	std::cout << "EVE Echoes bot for Linux." << std::endl;
+	cout << "EVE Echoes bot for Linux." << endl;
 
 	if (argc < 2) {
-		std::cout << "Bad arguments. See usage below.\n";
-		std::cout << _usage_str << std::endl;
+		cout << "Bad arguments. See usage below.\n";
+		cout << _usage_str << endl;
 		return -1;
 	}
-	std::cout << "Checking prerequisites...\n";
-	if (0 != std::system("scrcpy --help &> /dev/null")) {
-		std::cout << "scrcpy utility is not found. See usage below.\n";
-		std::cout << _usage_str << std::endl;
+	cout << "Checking prerequisites...\n";
+	if (0 != system("scrcpy --help &> /dev/null")) {
+		cout << "scrcpy utility is not found. See usage below.\n";
+		cout << _usage_str << endl;
 		return -1;
 	}
-	std::cout << " - scrcpy utility detected\n";
+	cout << " - scrcpy utility detected\n";
 
 	// start bot
 	try {
-		std::cout << "Configuring bot...\n";
-		std::ifstream config_file(argv[1]); // first argument must be JSON config file
+		cout << "Configuring bot...\n";
+		ifstream config_file(argv[1]); // first argument must be JSON config file
 		if (!config_file.is_open()) {
-			std::cout << "--- ERROR: faild to open config file '" << argv[1] << "'\n";
+			cout << "--- ERROR: faild to open config file '" << argv[1] << "'\n";
 			return -1;
 		}
 		json bot_settings = json::parse(config_file);
-		std::cout << " - config file '" << argv[1] << "' parsed\n";
+		cout << " - config file '" << argv[1] << "' parsed\n";
 		AndroidBot bot(bot_settings);
 		if (bot.state() != AndroidBot::states::initialized) {
-			std::cout << "--- ERROR: failed to initialize bot\n";
+			cout << "--- ERROR: failed to initialize bot.\n";
 			return -1;
 		}
-		std::cout << " - bot initialized\n";
-		std::cout << "Starting bot...\n";
-		bot.run();
+		cout << " - bot initialized\n";
+		cout << "Starting bot...\n";
+		return bot.run();
 	}
     catch (const json::parse_error& e) {
-		std::cout << "--- ERROR: failed to parse config file '" << argv[1] << "':\n";
-        std::cout << e.what() << std::endl;
+		cout << "--- ERROR: failed to parse config file '" << argv[1] << "':\n";
+        cout << e.what() << endl;
 		return -1;
     }
-    catch (const std::exception& e) {
-		std::cout << "--- ERROR: unhandled exception:\n";
-        std::cout << e.what() << std::endl;
+    catch (const exception& e) {
+		cout << "--- ERROR: unhandled exception:\n";
+        cout << e.what() << endl;
 		return -1;
 	}
 	catch(...) {
-		std::cout << "--- ERROR: unknown excepition type, terminating" << std::endl;
+		cout << "--- ERROR: unknown excepition type, terminating." << endl;
 		return -1;
 	}
-	return 0;
 }

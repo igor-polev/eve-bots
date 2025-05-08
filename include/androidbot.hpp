@@ -10,6 +10,7 @@
 #include "../libv4l2cpp/inc/V4l2Capture.h"
 
 using json = nlohmann::json;
+using namespace std;
 
 #define V4L2_DEFAULT_FPS 30
 
@@ -17,24 +18,26 @@ class AndroidBot {
 public:
 	enum states {
 		uninitialized,
-		initialized
+		initialized,
+		running,
+		stopped
 	};
   	AndroidBot() noexcept:
-		_adb_serial(),
-		_v4l2_dev_name(),
-		_v4l2_device(NULL),
-		_scr_res{0,0},
-		_v4l2_buffer_size(0),
-		_v4l2_buffer(NULL),
-		_check_interval(0),
-		_bot_state(states::uninitialized)
+		m_adb_serial(),
+		m_v4l2_dev_name(),
+		m_v4l2_device(NULL),
+		m_fullres{0,0},
+		m_v4l2_buffer_size(0),
+		m_v4l2_buffer(NULL),
+		m_check_interval(0),
+		m_bot_state(states::uninitialized)
 		{};
     AndroidBot(const json &settings) {
 		init(settings);
 	};
 	const bool init(const json &settings);
     virtual ~AndroidBot();
-	virtual void run();
+	virtual int run();
 	const states state() const noexcept {
 		return _bot_state;
 	};
@@ -43,14 +46,14 @@ private:
 		unsigned x;
 		unsigned y;
 	};
-	std::string    _adb_serial;
-	std::string    _v4l2_dev_name;
-	V4l2Capture   *_v4l2_device;
-	unsigned       _v4l2_buffer_size;
-	char          *_v4l2_buffer;
-	scr_resolution _scr_res;
-	unsigned       _check_interval;
-	states         _bot_state;
+	string         m_adb_serial;
+	string         m_v4l2_dev_name;
+	V4l2Capture   *m_v4l2_device;
+	unsigned       m_v4l2_buffer_size;
+	char          *m_v4l2_buffer;
+	scr_resolution m_fullres;
+	unsigned       m_check_interval;
+	states         m_bot_state;
 protected:
 	void adb_process();
 	void getframes_process();
