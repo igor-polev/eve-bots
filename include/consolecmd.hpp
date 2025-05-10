@@ -6,12 +6,13 @@
 */
 
 #pragma once
+#include <iostream>
+#include <ostream>
 #include <string>
 
 using namespace std;
 
 class ConsoleCmd : private string {
-private:
 public:
     ConsoleCmd() : string() {};
     ConsoleCmd(const string &cmd) : string(cmd) {};
@@ -26,6 +27,7 @@ public:
     };
     const string& to_string() const { return *this; };
     int execute() const {
+        cout << flush;
         return system(c_str());
     };
     bool available() const {

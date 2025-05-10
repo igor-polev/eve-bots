@@ -64,7 +64,7 @@ int main(int argc, char* argv[])
 	cout << "Validating sudo command...\n";
 	command = "sudo --validate";
 	if (0 != command.execute()) {
-		cout << "--- ERROR: failed to validate sudo command.\n";
+		cerr << "--- ERROR: failed to validate sudo command.\n";
 		return -1;
 	}
 
@@ -73,14 +73,14 @@ int main(int argc, char* argv[])
 		cout << "Configuring bot...\n";
 		ifstream config_file(argv[1]); // first argument must be JSON config file
 		if (!config_file.is_open()) {
-			cout << "--- ERROR: faild to open config file '" << argv[1] << "'\n";
+			cerr << "--- ERROR: faild to open config file '" << argv[1] << "'\n";
 			return -1;
 		}
 		json bot_settings = json::parse(config_file);
 		cout << " - config file '" << argv[1] << "' parsed\n";
 		AndroidBot bot(bot_settings);
 		if (bot.state() != AndroidBot::states::initialized) {
-			cout << "--- ERROR: failed to initialize bot.\n";
+			cerr << "--- ERROR: failed to initialize bot.\n";
 			return -1;
 		}
 		cout << " - bot initialized\n";
@@ -88,17 +88,17 @@ int main(int argc, char* argv[])
 		return bot.run();
 	}
     catch (const json::parse_error& e) {
-		cout << "--- ERROR: failed to parse config file '" << argv[1] << "':\n";
-        cout << e.what() << endl;
+		cerr << "--- ERROR (main): failed to parse config file '" << argv[1] << "':\n";
+        cerr << e.what() << endl;
 		return -1;
     }
     catch (const exception& e) {
-		cout << "--- ERROR: unhandled exception:\n";
-        cout << e.what() << endl;
+		cerr << "--- ERROR (main): unhandled exception:\n";
+        cerr << e.what() << endl;
 		return -1;
 	}
 	catch(...) {
-		cout << "--- ERROR: unknown excepition type, terminating." << endl;
+		cerr << "--- ERROR (main): unknown excepition type, terminating.\n";
 		return -1;
 	}
 }
