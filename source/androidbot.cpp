@@ -25,8 +25,8 @@ AndroidBot::AndroidBot(const json &settings) {
     try {
         m_adb_serial     = settings.at("adb_serial");
         m_v4l2_dev_name  = settings.at("v4l2_device");
-        m_fullres.x      = settings.at("fullres_x");
-        m_fullres.y      = settings.at("fullres_y");
+        m_resolution_x   = settings.at("resolution_x");
+        m_resolution_y   = settings.at("resolution_y");
         m_check_interval = settings.at("check_interval");
     }
     catch(const json::out_of_range& e) {
@@ -47,15 +47,6 @@ AndroidBot::AndroidBot(const json &settings) {
     i_key = settings.find("adb_wait_for");
     if (i_key != i_eof) { m_adb_wait_for = *i_key; }
     else                { m_adb_wait_for = adb_wait_default; }
-    i_key = settings.find("res_divide_factor");
-    if (i_key != i_eof) {
-        int r_factor = *i_key;
-        m_v4l2res.x = m_fullres.x / r_factor;
-        m_v4l2res.y = m_fullres.y / r_factor;
-    } else {
-        m_v4l2res.x = m_fullres.x;
-        m_v4l2res.y = m_fullres.y;
-    }
 
     // V4L2 device setup
     ConsoleCmd cmd {"sudo -n modprobe v4l2loopback"};
@@ -73,6 +64,13 @@ AndroidBot::AndroidBot(const json &settings) {
         + " &> /dev/null";
     if (0 != cmd.execute()) {
         cerr << "--- ERROR: failed to add device " << m_v4l2_dev_name << endl;
+        return;
+    }
+    cmd = string("sudo v4l2-ctl --set-ctrl sustain_framerate=1")
+        + " --device " + m_v4l2_dev_name;
+        //+ " &> /dev/null";
+    if (0 != cmd.execute()) {
+        cerr << "--- ERROR: failed to set attribute of device " << m_v4l2_dev_name << endl;
         return;
     }
 	m_v4l2_device = NULL;
@@ -123,7 +121,7 @@ void AndroidBot::adb_process() {
             + " --serial="    + m_adb_serial
             + " --v4l2-sink=" + m_v4l2_dev_name
             + " --max-fps="   + to_string(m_adb_fps)
-            + " --max-size="  + to_string(max(m_v4l2res.x, m_v4l2res.y))
+            + " --max-size="  + to_string(max(m_resolution_x, m_resolution_y))
             + " &> "          + m_adb_log
         };
         scrcpy_cmd.execute();
@@ -143,9 +141,9 @@ void AndroidBot::getframes_process() {
         V4L2DeviceParameters v4l2_params {
             m_v4l2_dev_name.c_str(),
             V4L2_PIX_FMT_YUV420,
-            m_v4l2res.y,  // seems like device consider portrait orientation
-            m_v4l2res.x, // while bot uses landscape, further investigation needed
-            m_adb_fps,      // looks like FPS values less then 30 is ignored, further investigation needed
+            m_resolution_x, // seems like device consider portrait orientation
+            m_resolution_y, // while bot uses landscape, further investigation needed
+            0,
             IOTYPE_MMAP
         };
         m_v4l2_device = V4l2Capture::create(v4l2_params);

@@ -9,6 +9,7 @@ Run a bot for EVE Echoes game.
 [`dkms`](https://wiki.archlinux.org/title/Dynamic_Kernel_Module_Support) package;
 [`v4l2loopback-dkms`](https://github.com/v4l2loopback/v4l2loopback) kernel module;
 [`v4l2loopback-utils`](https://github.com/v4l2loopback/v4l2loopback) package;
+[`v4l-utils`](https://www.linuxtv.org/wiki/index.php/V4l-utils) package;
 [`scrcpy`](https://github.com/Genymobile/scrcpy) utility;
 [`sudo`] command (required to setup v4l2loopback devices).
 

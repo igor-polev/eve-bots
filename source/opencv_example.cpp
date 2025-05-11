@@ -1,4 +1,4 @@
-/*
+
 #include <opencv2/opencv.hpp>
 
 bool detectImage(const cv::Mat& bigImage, const cv::Mat& smallImage) {
@@ -20,4 +20,3 @@ if (detectImage(bigImage, smallImage)) {
 } else {
   std::cout << "Small image not found." << std::endl;
 }
-*/

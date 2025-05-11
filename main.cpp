@@ -42,6 +42,7 @@ int main(int argc, char* argv[])
 	string cmd_list[] {
 		"dkms",
 		"v4l2loopback-ctl",
+		"v4l2-ctl",
 		"scrcpy",
 		"sudo"
 	};

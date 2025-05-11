@@ -3,9 +3,8 @@
     "adb_serial"        : "cilru8inmbjne6ln",
     "v4l2_device"       : "/dev/video10",
     "check_interval"    : 800,
-    "fullres_x"         : 1080,
-    "fullres_y"         : 2336,
-    "res_divide_factor" : 1,
-    "adb_fps"           : 30,
+    "resolution_x"      : 1168,
+    "resolution_y"      : 536,
+    "adb_fps"           : 5,
     "adb_wait_for"      : 4
 }
