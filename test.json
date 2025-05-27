@@ -2,9 +2,16 @@
     "adb_name"          : "Redmi8Pro",
     "adb_serial"        : "cilru8inmbjne6ln",
     "v4l2_device"       : "/dev/video10",
-    "check_interval"    : 800,
-    "resolution_x"      : 1168,
-    "resolution_y"      : 536,
+    "adb_wait_for"      : 4,
     "adb_fps"           : 5,
-    "adb_wait_for"      : 4
+    "check_interval"    : 800,
+    "width"             : 2336,
+    "height"            : 1080,
+    "res_reference_img" : "eve_ref_2340x1080.png",
+    "src_reference_img" : "eve_ref_2880x1800.png",
+
+    "src_images" : [
+        "eve_ref_2880x1800.png",
+        "eve_ref_2880x1800.png"
+    ]
 }

@@ -1,12 +1,14 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.12)
 project(eve_bot)
 
 set(CMAKE_CXX_STANDARD          14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Dependencies
+set(CUDAToolkit_ROOT /opt/cuda)
 find_package(OpenCV        REQUIRED)
 find_package(nlohmann_json REQUIRED)
+include_directories(${OpenCV_INCLUDE_DIRS})
 
 # libv4l2cpp V4L2 wrapper
 include_directories (libv4l2cpp/inc)

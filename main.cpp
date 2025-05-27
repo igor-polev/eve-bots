@@ -5,6 +5,7 @@
 	See usage string below.
 */
 
+#include <csignal>
 #include <exception>
 #include <fstream>
 #include <iostream>
@@ -30,51 +31,52 @@ Usage:
 
 int main(int argc, char* argv[]) 
 {
-	cout << "EVE Echoes bot for Linux." << endl;
+	try {
+		cout << "EVE Echoes bot for Linux." << endl;
 
-	if (argc < 2) {
-		cout << "Bad arguments. See usage below.\n";
-		cout << _usage_str << endl;
-		return -1;
-	}
-	cout << "Checking prerequisites...\n";
-	ConsoleCmd command;
-	string cmd_list[] {
-		"dkms",
-		"v4l2loopback-ctl",
-		"v4l2-ctl",
-		"scrcpy",
-		"sudo"
-	};
-	for (string cmd : cmd_list) {
-		command = cmd + " --help";
-		if (!command.available()) {
-			cout << cmd << " is not available. See usage below.\n";
-			cout << _usage_str << endl;
+		if (argc < 2) {
+			cout << "Bad arguments. See usage below.\n"
+				<< _usage_str << endl;
 			return -1;
 		}
-		cout << " - " << cmd << " present\n";
-	}
-	command = "dkms status | grep v4l2loopback";
-	if (!command.has_output()) {
-		cout << " - v4l2loopback kernel module not found. See usage below.\n";
-		cout << _usage_str << endl;
-		return -1;
-	}
-	cout << " - v4l2loopback kernel module detected\n";
-	cout << "Validating sudo command...\n";
-	command = "sudo --validate";
-	if (0 != command.execute()) {
-		cerr << "--- ERROR: failed to validate sudo command.\n";
-		return -1;
-	}
+		cout << "Checking prerequisites...\n";
+		ConsoleCmd command;
+		string cmd_list[] {
+			"dkms",
+			"v4l2loopback-ctl",
+			"v4l2-ctl",
+			"scrcpy",
+			"sudo"
+		};
+		for (string cmd : cmd_list) {
+			command = cmd + " --help";
+			if (!command.available()) {
+				cout << cmd << " is not available. See usage below.\n"
+					<< _usage_str << endl;
+				return -1;
+			}
+			cout << " - " << cmd << " present\n";
+		}
+		command = "dkms status | grep v4l2loopback";
+		if (!command.has_output()) {
+			cout << " - v4l2loopback kernel module not found. See usage below.\n"
+				<< _usage_str << endl;
+			return -1;
+		}
+		cout << " - v4l2loopback kernel module detected\n";
+		cout << "Validating sudo command...\n";
+		command = "sudo --validate";
+		if (0 != command.execute()) {
+			cerr << "--- ERROR: failed to validate sudo command.\n";
+			return -1;
+		}
 
-	// start bot
-	try {
+		// start bot
 		cout << "Configuring bot...\n";
 		ifstream config_file(argv[1]); // first argument must be JSON config file
 		if (!config_file.is_open()) {
-			cerr << "--- ERROR: faild to open config file '" << argv[1] << "'\n";
+			cerr << "--- ERROR: faild to open config file '"
+			     << argv[1] << "'\n";
 			return -1;
 		}
 		json bot_settings = json::parse(config_file);
@@ -86,20 +88,22 @@ int main(int argc, char* argv[])
 		}
 		cout << " - bot initialized\n";
 		cout << "Starting bot...\n";
-		return bot.run();
+		bot.run();
 	}
     catch (const json::parse_error& e) {
-		cerr << "--- ERROR (main): failed to parse config file '" << argv[1] << "':\n";
-        cerr << e.what() << endl;
+		cerr << "--- ERROR (main): failed to parse config file '"
+		     << argv[1] << "':\n"
+             << e.what() << endl;
 		return -1;
     }
     catch (const exception& e) {
-		cerr << "--- ERROR (main): unhandled exception:\n";
-        cerr << e.what() << endl;
+		cerr << "--- ERROR (main): unhandled exception:\n"
+             << e.what() << endl;
 		return -1;
 	}
 	catch(...) {
 		cerr << "--- ERROR (main): unknown excepition type, terminating.\n";
 		return -1;
 	}
+	kill(0, SIGTERM);
 }
