@@ -34,9 +34,9 @@ protected:
     constexpr static const float UC_TO_FP_SCALE   {1.0 / 255.0};
 	typedef vector<cv::Mat>::size_type idx_type;
 
-	virtual void process_frame(); // convert data from v4l2 buffer
+	virtual void process_frame();  // convert data from v4l2 buffer
 	virtual double detect_image(idx_type idx);
-	inline  double detect_image(string image_name) {
+	inline double detect_image(string image_name) {
 		return detect_image(m_src_img_map[image_name]);
 	}
 	
@@ -52,15 +52,18 @@ private:
 	V4l2Capture *mp_v4l2_device  {nullptr};
 	states       m_bot_state     {uninitialized};
 	// user defined settings
-	string       m_adb_name;       // user friendly name of Android device
-	string       m_adb_serial;     // serial number of Android device
-	string       m_v4l2_dev_name;  // v4l2 video device path, for ex.: /dev/video7
-	cv::Size     m_resolution;     // user-defined resolution of video stream
-	double       m_scale_factor;   // scaling factor form search images to stream resolution 
-	int          m_adb_fps;        // user-defined FPS of video stream
-	long         m_check_interval; // bot screen check interval in milliseconds
-	long         m_adb_wait_for;   // time to wait for ADB to init in seconds
-	string       m_adb_log;        // filename for ADB log
+	string       m_adb_name;        // user friendly name of Android device
+	string       m_adb_serial;      // serial number of Android device
+	string       m_v4l2_dev_name;   // v4l2 video device path, for ex.: /dev/video7
+	cv::Size     m_resolution;      // user-defined resolution of video stream
+	double       m_scale_factor;    // scaling factor form search images to stream resolution 
+	int          m_adb_fps;         // user-defined FPS of video stream
+	long         m_check_interval;  // bot screen check interval in milliseconds
+	long         m_adb_wait_for;    // time to wait for ADB to init in seconds
+	bool         m_dump_frames;     // dump each frame to file
+	bool         m_force_greyscale; // force image detection in greayscale mode
+	// internal methods
+	bool collect_images(const json& filenames, bool force_gs); // load library of images
 	// threads
 	void adb_process();
 	void getframes_process();

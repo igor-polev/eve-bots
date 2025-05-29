@@ -45,68 +45,12 @@ AndroidBot::AndroidBot(const json &settings)
             return;
         }
         m_scale_factor /= static_cast<double>(image.cols);
-
-        // set of search images
-        json src_images = settings.at("src_images");
-        auto img_count = src_images.size();
-        if (img_count < 1) {
-            cerr << "--- ERROR: no images to search found in config file" << endl;
-            return;
-        }
-        m_src_images.reserve(img_count);
-        m_src_masks .reserve(img_count);
-        string img_filename;
-        for (idx_type i = 0; i < img_count; i++)
-        {
-            img_filename = src_images[i];
-            image = cv::imread(img_filename, cv::IMREAD_UNCHANGED);
-            if (image.empty()) {
-                cerr << "--- ERROR: failed to read image "
-                     << img_filename << endl;
-                return;
-            }
-            cv::resize(
-                image,
-                image_scaled,
-                cv::Size(),
-                m_scale_factor,
-                m_scale_factor,
-                cv::INTER_AREA // normally scale down expected
-            );
-        
-            // split alpha channel
-            auto channel_cnt = image_scaled.channels();
-            if (channel_cnt == 2 || 4 == channel_cnt) {
-                cv::Mat channels[channel_cnt];
-                cv::split(image_scaled, channels);
-                channel_cnt--;
-                double alphaMinValue;
-                cv::minMaxLoc(channels[channel_cnt],&alphaMinValue);
-                if (alphaMinValue > 0.0) // alpha channel is irrelevant
-                    image.release(); // 'image' variable will store alpha channel
-                else
-                    channels[channel_cnt].convertTo(image, CV_8UC1);
-                cv::merge(channels, channel_cnt, image_scaled);
-            }
-            else
-                image.release();
-
-            image_scaled.convertTo(
-                image_scaled,
-                CV_32FC(image_scaled.channels()),
-                UC_TO_FP_SCALE
-            );
-            m_src_images.push_back(image_scaled);
-            m_src_masks .push_back(image);
-            m_src_img_map[img_filename] = i;
-        }
     }
     catch(const json::out_of_range& e) {
 		cerr << "--- ERROR: required parameter is not found in config file:\n";
         cerr << e.what() << endl;
         return;
     }
-    m_adb_log = m_adb_serial + "_log.txt";
     
     // optional JSON settings
     auto i_eof = settings.end();
@@ -119,6 +63,31 @@ AndroidBot::AndroidBot(const json &settings)
     i_key = settings.find("adb_wait_for");
     if (i_key != i_eof) m_adb_wait_for = *i_key;
     else                m_adb_wait_for = ADB_WAIT_DEFAULT;
+    i_key = settings.find("dump_frames");
+    if (i_key != i_eof) m_dump_frames = *i_key;
+    else                m_dump_frames = false;
+    i_key = settings.find("force_greyscale");
+    if (i_key != i_eof) m_force_greyscale = *i_key;
+    else                m_force_greyscale = false;
+
+    // search images library
+    bool img_collected {false};
+    i_key = settings.find("src_images");
+    if (i_key != i_eof) {
+        auto img_count = i_key->size();
+        if (img_count > 0) {
+            m_src_images.reserve(img_count);
+            m_src_masks .reserve(img_count);
+            img_collected = collect_images(
+                *i_key,
+                m_force_greyscale
+            );
+        }
+    }
+    if (!img_collected) {
+        cerr << "--- ERROR: no images to search found in config file" << endl;
+        return;
+    }
 
     // V4L2 device setup
     ConsoleCmd cmd {"sudo -n modprobe v4l2loopback"};
@@ -157,6 +126,66 @@ AndroidBot::~AndroidBot()
     if (mp_frame_yuv)   delete   mp_frame_yuv;
     if (mp_frame_rgb)   delete   mp_frame_rgb;
     if (mp_frame_fp)    delete   mp_frame_fp;
+}
+
+bool AndroidBot::collect_images(const json& filenames, bool force_gs)
+{
+    string img_filename;
+    cv::Mat image, image_scaled;
+    auto img_count = filenames.size();
+    for (idx_type i = 0; i < img_count; i++)
+    {
+        img_filename = filenames[i];
+        image = cv::imread(img_filename, cv::IMREAD_UNCHANGED);
+        if (image.empty()) {
+            cerr << "--- ERROR: failed to read image "
+                 << img_filename << endl;
+            return false;
+        }
+        cv::resize(
+            image,
+            image_scaled,
+            cv::Size(),
+            m_scale_factor,
+            m_scale_factor,
+            cv::INTER_AREA // normally scale down expected
+        );
+    
+        // split alpha channel
+        auto channel_cnt = image_scaled.channels();
+        if (channel_cnt == 2 || 4 == channel_cnt) {
+            cv::Mat channels[channel_cnt];
+            cv::split(image_scaled, channels);
+            channel_cnt--;
+            double alphaMinValue;
+            cv::minMaxLoc(channels[channel_cnt],&alphaMinValue);
+            if (alphaMinValue > 0.0) // alpha channel is irrelevant
+                image.release(); // 'image' variable now store alpha channel
+            else
+                channels[channel_cnt].convertTo(image, CV_8UC1);
+            cv::merge(channels, channel_cnt, image_scaled);
+        }
+        else
+            image.release();
+        m_src_masks.push_back(image);
+
+        if (force_gs && image_scaled.channels() > 1)
+            cv::cvtColor(
+                image_scaled,
+                image, // 'image' variable again store image itself
+                cv::COLOR_RGB2GRAY
+            );
+        else
+            image = image_scaled;
+        image.convertTo(
+            image,
+            CV_32FC(image_scaled.channels()),
+            UC_TO_FP_SCALE
+        );
+        m_src_images.push_back(image);
+        m_src_img_map[img_filename] = i;
+    }
+    return true;
 }
 
 void AndroidBot::run()
@@ -207,7 +236,7 @@ void AndroidBot::adb_process()
                 m_resolution.width,
                 m_resolution.height
             ))
-            + " &> " + m_adb_log
+            + " &> " + m_adb_serial + "_log.txt"
         };
         scrcpy_cmd.execute();
     }
@@ -243,8 +272,9 @@ void AndroidBot::getframes_process()
             CV_8UC1,
             static_cast<void*>(mp_v4l2_buffer)
         };
-        mp_frame_rgb = new cv::Mat {m_resolution, CV_8UC3};
-        mp_frame_fp  = new cv::Mat {m_resolution, CV_32FC3};
+        short c = m_force_greyscale ? 1 : 3;
+        mp_frame_rgb = new cv::Mat {m_resolution, CV_8UC(c)};
+        mp_frame_fp  = new cv::Mat {m_resolution, CV_32FC(c)};
     
         size_t bytes_read {0};
         chrono::milliseconds sleep_time {m_check_interval};
@@ -317,19 +347,29 @@ void AndroidBot::console_process()
 
 void AndroidBot::process_frame()
 {
+    int channels;
+    cv::ColorConversionCodes convert_type;
+    if (m_force_greyscale) {
+        convert_type = cv::COLOR_YUV2GRAY_YV12;
+        channels = 1;
+    }
+    else {
+        convert_type = cv::COLOR_YUV2RGB_YV12;
+        channels = 3;
+    }
     cv::cvtColor(
         *mp_frame_yuv,
         *mp_frame_rgb,
-        cv::COLOR_YUV2RGB_YV12,
-        3
+        convert_type,
+        channels
     );
     mp_frame_rgb->convertTo(
         *mp_frame_fp,
-        CV_32FC3,
+        CV_32FC(channels),
         UC_TO_FP_SCALE
     );
-    // TEST ONLY
-    if (!cv::imwrite("frame.png", *mp_frame_rgb))
+    if (!m_dump_frames) return;
+    if (!cv::imwrite(m_adb_serial + ".png", *mp_frame_rgb))
         cerr << "--- ERROR (process_frame): failed to save frame\n";
 }
 
@@ -337,7 +377,7 @@ double AndroidBot::detect_image(idx_type idx)
 {
     double result;
     cv::Mat frame, match_result;
-    if (1 == m_src_images[idx].channels())
+    if (!m_force_greyscale && 1 == m_src_images[idx].channels())
         cv::cvtColor(
             *mp_frame_fp,
             frame,
