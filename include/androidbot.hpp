@@ -10,7 +10,6 @@
 #include <nlohmann/json.hpp>
 #include <opencv2/core/types.hpp>
 #include <opencv2/core/mat.hpp>
-#include <sys/types.h>
 #include "../libv4l2cpp/inc/V4l2Capture.h"
 
 using namespace std;
@@ -30,18 +29,28 @@ public:
 	virtual void run();
 	const states state() const noexcept { return m_bot_state; }
 protected:
-	constexpr static const int  V4L2_FPS_DEFAULT {30};
-	constexpr static const long ADB_WAIT_DEFAULT {5};
+	constexpr static const int   V4L2_FPS_DEFAULT {30};
+	constexpr static const long  ADB_WAIT_DEFAULT {5};
+    constexpr static const float UC_TO_FP_SCALE   {1.0 / 255.0};
+	typedef vector<cv::Mat>::size_type idx_type;
 
-	vector<cv::Mat> m_src_images; // library of images to search for
-	virtual void process_frame(); // convert data from v4l2 buffer into usable image
+	virtual void process_frame(); // convert data from v4l2 buffer
+	virtual double detect_image(idx_type idx);
+	inline  double detect_image(string image_name) {
+		return detect_image(m_src_img_map[image_name]);
+	}
+	
+	vector<cv::Mat>       m_src_images;  // library of images to search for
+	vector<cv::Mat>       m_src_masks;   // masks for each image
+	map<string, idx_type> m_src_img_map; // image library index
+	cv::Mat     *mp_frame_fp     {nullptr};
+	cv::Mat     *mp_frame_rgb    {nullptr};
+	cv::Mat     *mp_frame_yuv    {nullptr};
+	char        *mp_v4l2_buffer  {nullptr};
 private:
-	states       m_bot_state     {uninitialized};
 	size_t       m_v4l2_buf_size {0};
 	V4l2Capture *mp_v4l2_device  {nullptr};
-	char        *mp_v4l2_buffer  {nullptr};
-	cv::Mat     *mp_frame_yuv    {nullptr};
-	cv::Mat     *mp_frame_rgb    {nullptr};
+	states       m_bot_state     {uninitialized};
 	// user defined settings
 	string       m_adb_name;       // user friendly name of Android device
 	string       m_adb_serial;     // serial number of Android device

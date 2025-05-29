@@ -105,5 +105,6 @@ int main(int argc, char* argv[])
 		cerr << "--- ERROR (main): unknown excepition type, terminating.\n";
 		return -1;
 	}
-	kill(0, SIGTERM);
+	kill(0, SIGTERM); // kill is needed to terminate detached thread
+	return 0; // never reached
 }

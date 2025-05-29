@@ -7,6 +7,8 @@
 
 #include "androidbot.hpp"
 #include "consolecmd.hpp"
+#include "opencv2/core.hpp"
+#include "opencv2/core/mat.hpp"
 
 #include <fcntl.h>
 #include <iostream>
@@ -24,8 +26,8 @@ AndroidBot::AndroidBot(const json &settings)
         m_adb_serial        = settings.at("adb_serial");
         m_v4l2_dev_name     = settings.at("v4l2_device");
         m_check_interval    = settings.at("check_interval");
-        m_resolution.width  = settings.at("width");
-        m_resolution.height = settings.at("height");
+        m_resolution.width  = settings.at("res_width");
+        m_resolution.height = settings.at("res_height");
 
         // scale factor calculation
         cv::Mat image, image_scaled;
@@ -52,11 +54,15 @@ AndroidBot::AndroidBot(const json &settings)
             return;
         }
         m_src_images.reserve(img_count);
-        for (string img_file: src_images) {
-            image = cv::imread(img_file);
+        m_src_masks .reserve(img_count);
+        string img_filename;
+        for (idx_type i = 0; i < img_count; i++)
+        {
+            img_filename = src_images[i];
+            image = cv::imread(img_filename, cv::IMREAD_UNCHANGED);
             if (image.empty()) {
                 cerr << "--- ERROR: failed to read image "
-                     << img_file << endl;
+                     << img_filename << endl;
                 return;
             }
             cv::resize(
@@ -67,7 +73,32 @@ AndroidBot::AndroidBot(const json &settings)
                 m_scale_factor,
                 cv::INTER_AREA // normally scale down expected
             );
+        
+            // split alpha channel
+            auto channel_cnt = image_scaled.channels();
+            if (channel_cnt == 2 || 4 == channel_cnt) {
+                cv::Mat channels[channel_cnt];
+                cv::split(image_scaled, channels);
+                channel_cnt--;
+                double alphaMinValue;
+                cv::minMaxLoc(channels[channel_cnt],&alphaMinValue);
+                if (alphaMinValue > 0.0) // alpha channel is irrelevant
+                    image.release(); // 'image' variable will store alpha channel
+                else
+                    channels[channel_cnt].convertTo(image, CV_8UC1);
+                cv::merge(channels, channel_cnt, image_scaled);
+            }
+            else
+                image.release();
+
+            image_scaled.convertTo(
+                image_scaled,
+                CV_32FC(image_scaled.channels()),
+                UC_TO_FP_SCALE
+            );
             m_src_images.push_back(image_scaled);
+            m_src_masks .push_back(image);
+            m_src_img_map[img_filename] = i;
         }
     }
     catch(const json::out_of_range& e) {
@@ -125,6 +156,7 @@ AndroidBot::~AndroidBot()
     if (mp_v4l2_buffer) delete[] mp_v4l2_buffer;
     if (mp_frame_yuv)   delete   mp_frame_yuv;
     if (mp_frame_rgb)   delete   mp_frame_rgb;
+    if (mp_frame_fp)    delete   mp_frame_fp;
 }
 
 void AndroidBot::run()
@@ -146,7 +178,7 @@ void AndroidBot::run()
     cout << " - starting V4L2 capture from "
          << m_v4l2_dev_name << "\n";
     thread gf_thread(&AndroidBot::getframes_process, this);
-    cout << "Bot is running. Enter 'STOP' to terminate.\n";
+    cout << "Bot is running. Enter 'stop' to terminate.\n";
     thread ui_thread(&AndroidBot::console_process, this);
 
     gf_thread.join();
@@ -156,7 +188,7 @@ void AndroidBot::run()
 
 void AndroidBot::adb_process()
 {
-    try {
+    try { // each thread requires its own exception handling
         ConsoleCmd scrcpy_cmd {
             string(
                 "scrcpy"
@@ -194,11 +226,7 @@ void AndroidBot::getframes_process()
         V4L2DeviceParameters v4l2_params {
             m_v4l2_dev_name.c_str(),
             V4L2_PIX_FMT_YUV420,
-            // seems like device consider portrait orientation
-            // while bot uses landscape, further investigation needed
-            static_cast<unsigned>(m_resolution.width),
-            static_cast<unsigned>(m_resolution.height),
-            0,
+            0, 0, 0,
             IOTYPE_MMAP
         };
         mp_v4l2_device = V4l2Capture::create(v4l2_params);
@@ -216,6 +244,7 @@ void AndroidBot::getframes_process()
             static_cast<void*>(mp_v4l2_buffer)
         };
         mp_frame_rgb = new cv::Mat {m_resolution, CV_8UC3};
+        mp_frame_fp  = new cv::Mat {m_resolution, CV_32FC3};
     
         size_t bytes_read {0};
         chrono::milliseconds sleep_time {m_check_interval};
@@ -255,11 +284,25 @@ void AndroidBot::getframes_process()
 void AndroidBot::console_process()
 {
     try { // each thread requires its own exception handling
-        std::string user_cmd;
-        while (user_cmd != "STOP")
+        string user_cmd;
+        while (true)
         {
-            std::cout << "BOT>";
-            std::cin  >> user_cmd;
+            cout << "BOT>";
+            cin  >> user_cmd;
+            if ("stop" == user_cmd)
+                break;
+            else if ("d" == user_cmd) {
+                // TEST
+                cv::TickMeter tickMeter;
+                tickMeter.start();
+                double prob = detect_image(0);
+                tickMeter.stop();
+                cout << "detection probability: " << prob << endl
+                     << "time spend: " << tickMeter.getTimeSec() << "s" << endl;
+            }
+            else
+                cout << "Unknown command: "
+                     << user_cmd << endl;
         }
         m_bot_state = stopped;
     }
@@ -274,14 +317,41 @@ void AndroidBot::console_process()
 
 void AndroidBot::process_frame()
 {
-    // TEST ONLY
     cv::cvtColor(
         *mp_frame_yuv,
         *mp_frame_rgb,
         cv::COLOR_YUV2RGB_YV12,
         3
     );
+    mp_frame_rgb->convertTo(
+        *mp_frame_fp,
+        CV_32FC3,
+        UC_TO_FP_SCALE
+    );
+    // TEST ONLY
     if (!cv::imwrite("frame.png", *mp_frame_rgb))
         cerr << "--- ERROR (process_frame): failed to save frame\n";
-    // TEST ONLY
+}
+
+double AndroidBot::detect_image(idx_type idx)
+{
+    double result;
+    cv::Mat frame, match_result;
+    if (1 == m_src_images[idx].channels())
+        cv::cvtColor(
+            *mp_frame_fp,
+            frame,
+            cv::COLOR_RGB2GRAY
+        );
+    else
+        frame = *mp_frame_fp;
+    cv::matchTemplate(
+        frame,
+        m_src_images[idx],
+        match_result,
+        cv::TM_CCORR_NORMED,
+        m_src_masks[idx].empty() ? cv::noArray() : m_src_masks[idx]
+    );
+    cv::minMaxLoc(match_result, nullptr, &result);
+    return result;
 }
