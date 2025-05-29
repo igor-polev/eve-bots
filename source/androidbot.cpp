@@ -240,6 +240,7 @@ void AndroidBot::adb_process()
         };
         scrcpy_cmd.execute();
     }
+    // can't stop the bot because this theread is detached
     catch (const exception& e) {
 		cerr << "--- ERROR (adb_process): unhandled exception:\n";
         cerr << e.what() << endl;
@@ -305,9 +306,11 @@ void AndroidBot::getframes_process()
     catch (const exception& e) {
 		cerr << "--- ERROR (getframes_process): unhandled exception:\n"
              << e.what() << endl;
+        m_bot_state = stopped;
 	}
 	catch (...) {
 		cerr << "--- ERROR (getframes_process): unknown excepition type.\n";
+        m_bot_state = stopped;
 	}
 }
 
@@ -339,9 +342,11 @@ void AndroidBot::console_process()
     catch (const exception& e) {
 		cerr << "--- ERROR (console_process): unhandled exception:\n"
              << e.what() << endl;
-	}
+        m_bot_state = stopped;
+    }
 	catch (...) {
 		cerr << "--- ERROR (console_process): unknown excepition type.\n";
+        m_bot_state = stopped;
 	}
 }
 
