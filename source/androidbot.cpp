@@ -240,6 +240,7 @@ void AndroidBot::adb_process()
         };
         scrcpy_cmd.execute();
     }
+    // can't stop the bot because this theread is detached
     catch (const exception& e) {
 		cerr << "--- ERROR (adb_process): unhandled exception:\n";
         cerr << e.what() << endl;
@@ -305,9 +306,11 @@ void AndroidBot::getframes_process()
     catch (const exception& e) {
 		cerr << "--- ERROR (getframes_process): unhandled exception:\n"
              << e.what() << endl;
+        m_bot_state = stopped;
 	}
 	catch (...) {
 		cerr << "--- ERROR (getframes_process): unknown excepition type.\n";
+        m_bot_state = stopped;
 	}
 }
 
@@ -315,12 +318,12 @@ void AndroidBot::console_process()
 {
     try { // each thread requires its own exception handling
         string user_cmd;
-        while (true)
+        while (m_bot_state == running)
         {
             cout << "BOT>";
             cin  >> user_cmd;
             if ("stop" == user_cmd)
-                break;
+                m_bot_state = stopped;
             else if ("d" == user_cmd) {
                 // TEST
                 cv::TickMeter tickMeter;
@@ -334,14 +337,15 @@ void AndroidBot::console_process()
                 cout << "Unknown command: "
                      << user_cmd << endl;
         }
-        m_bot_state = stopped;
     }
     catch (const exception& e) {
 		cerr << "--- ERROR (console_process): unhandled exception:\n"
              << e.what() << endl;
-	}
+        m_bot_state = stopped;
+    }
 	catch (...) {
 		cerr << "--- ERROR (console_process): unknown excepition type.\n";
+        m_bot_state = stopped;
 	}
 }
 
