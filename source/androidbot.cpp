@@ -122,8 +122,8 @@ AndroidBot::AndroidBot(const json &settings)
 
 AndroidBot::~AndroidBot()
 {
-    if (mp_v4l2_device) delete   mp_v4l2_device;
     if (mp_v4l2_buffer) delete[] mp_v4l2_buffer;
+    if (mp_v4l2_device) delete   mp_v4l2_device;
     if (mp_frame_yuv)   delete   mp_frame_yuv;
     if (mp_frame_rgb)   delete   mp_frame_rgb;
     if (mp_frame_fp)    delete   mp_frame_fp;
@@ -131,56 +131,57 @@ AndroidBot::~AndroidBot()
 
 bool AndroidBot::collect_images(const json& filenames, bool force_gs)
 {
+    using namespace cv;
     string img_filename;
-    cv::Mat image, image_scaled;
+    Mat image, image_scaled;
     auto img_count = filenames.size();
     for (idx_type i = 0; i < img_count; i++)
     {
         img_filename = filenames[i];
-        image = cv::imread(img_filename, cv::IMREAD_UNCHANGED);
+        image = imread(img_filename, IMREAD_UNCHANGED);
         if (image.empty()) {
             cerr << "--- ERROR: failed to read image "
                  << img_filename << endl;
             return false;
         }
-        cv::resize(
+        resize(
             image,
             image_scaled,
-            cv::Size(),
+            Size(),
             m_scale_factor,
             m_scale_factor,
-            cv::INTER_AREA // normally scale down expected
+            INTER_AREA // normally scale down expected
         );
     
         // split alpha channel
         auto channel_cnt = image_scaled.channels();
         if (channel_cnt == 2 || 4 == channel_cnt) {
-            cv::Mat channels[channel_cnt];
-            cv::split(image_scaled, channels);
+            Mat channels[channel_cnt];
+            split(image_scaled, channels);
             channel_cnt--;
             double alphaMinValue;
-            cv::minMaxLoc(channels[channel_cnt],&alphaMinValue);
+            minMaxLoc(channels[channel_cnt],&alphaMinValue);
             if (alphaMinValue > 0.0) // alpha channel is irrelevant
                 image.release(); // 'image' variable now store alpha channel
             else
                 channels[channel_cnt].convertTo(image, CV_8UC1);
-            cv::merge(channels, channel_cnt, image_scaled);
+            merge(channels, channel_cnt, image_scaled);
         }
         else
             image.release();
         m_src_masks.push_back(image);
 
         if (force_gs && image_scaled.channels() > 1)
-            cv::cvtColor(
+            cvtColor(
                 image_scaled,
-                image, // 'image' variable again store image itself
-                cv::COLOR_RGB2GRAY
+                image, // 'image' variable again stores image itself
+                COLOR_RGB2GRAY
             );
         else
             image = image_scaled;
         image.convertTo(
             image,
-            CV_32FC(image_scaled.channels()),
+            CV_32FC(image.channels()),
             UC_TO_FP_SCALE
         );
         m_src_images.push_back(image);
@@ -413,30 +414,31 @@ void AndroidBot::process_frame()
 
 double AndroidBot::detect_image(idx_type idx)
 {
+    using namespace cv;
     // this function does not change object data
     // but we lock while copying frame into local variable
     // to prevent image distortion from getframes thread
-    cv::Mat frame;
+    Mat frame;
     unique_lock<mutex> data_lock {m_mutex_all};
     if (!m_force_greyscale && 1 == m_src_images[idx].channels())
-        cv::cvtColor(
+        cvtColor(
             *mp_frame_fp,
             frame,
-            cv::COLOR_RGB2GRAY
+            COLOR_RGB2GRAY
         );
     else
         frame = mp_frame_fp->clone();
     data_lock.unlock();
 
     double detection;
-    cv::Mat match_result;
-    cv::matchTemplate(
+    Mat match_result;
+    matchTemplate(
         frame,
         m_src_images[idx],
         match_result,
-        cv::TM_CCORR_NORMED,
-        m_src_masks[idx].empty() ? cv::noArray() : m_src_masks[idx]
+        TM_CCORR_NORMED,
+        m_src_masks[idx].empty() ? noArray() : m_src_masks[idx]
     );
-    cv::minMaxLoc(match_result, nullptr, &detection);
+    minMaxLoc(match_result, nullptr, &detection);
     return detection;
 }
