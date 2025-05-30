@@ -12,6 +12,7 @@
 
 #include <fcntl.h>
 #include <iostream>
+#include <mutex>
 #include <string>
 #include <chrono>
 #include <thread>
@@ -194,15 +195,24 @@ void AndroidBot::run()
         cerr << "--- ERROR: can't start uninitialized bot\n";
         return;
     }
+    unique_lock<mutex> data_lock {m_mutex_all, defer_lock};
 
+    // start ADB interface
     cout << " - starting ADB interface on '"
          << m_adb_name << "'\n";
     thread adb_thread(&AndroidBot::adb_process, this);
+    // need to give adb_thread some time to init
+    // otherwise gf_thread will fail to access V4L2 device
     cout << " - waiting ADB interface to init for "
          << m_adb_wait_for << " seconds\n";
     this_thread::sleep_for(chrono::seconds(m_adb_wait_for));
-    adb_thread.detach(); // WARNING! Thread will loose access to this object after detach  
+    // WARNING! adb_thread will loose access to this object after detach
+    data_lock.lock(); // to be sure that adb_thread allready got data
+    adb_thread.detach();
+    data_lock.unlock();
+    if (m_bot_state == stopped) return;
 
+    // start V4L2 capture and console UI
     m_bot_state = running;
     cout << " - starting V4L2 capture from "
          << m_v4l2_dev_name << "\n";
@@ -210,6 +220,7 @@ void AndroidBot::run()
     cout << "Bot is running. Enter 'stop' to terminate.\n";
     thread ui_thread(&AndroidBot::console_process, this);
 
+    // normal termination
     gf_thread.join();
     ui_thread.join();
     cout << "Bot stopped.\n";
@@ -217,6 +228,9 @@ void AndroidBot::run()
 
 void AndroidBot::adb_process()
 {
+    // this thread will be detached and will lose access to this object
+    // so we lock data - detach will happen after we unlock it
+    unique_lock<mutex> data_lock {m_mutex_all};
     try { // each thread requires its own exception handling
         ConsoleCmd scrcpy_cmd {
             string(
@@ -238,9 +252,9 @@ void AndroidBot::adb_process()
             ))
             + " &> " + m_adb_serial + "_log.txt"
         };
+        data_lock.unlock();
         scrcpy_cmd.execute();
     }
-    // can't stop the bot because this theread is detached
     catch (const exception& e) {
 		cerr << "--- ERROR (adb_process): unhandled exception:\n";
         cerr << e.what() << endl;
@@ -248,11 +262,19 @@ void AndroidBot::adb_process()
 	catch(...) {
 		cerr << "--- ERROR (adb_process): unknown excepition type, terminating.\n";
 	}
+    // can't stop the bot after detach but can until we hold data lock
+    if (data_lock) {
+        m_bot_state = stopped;
+        data_lock.unlock();
+    }
 }
 
 void AndroidBot::getframes_process()
 {
+    unique_lock<mutex> data_lock {m_mutex_all};
     try { // each thread requires its own exception handling
+        
+        // init section
         V4L2DeviceParameters v4l2_params {
             m_v4l2_dev_name.c_str(),
             V4L2_PIX_FMT_YUV420,
@@ -276,7 +298,9 @@ void AndroidBot::getframes_process()
         short c = m_force_greyscale ? 1 : 3;
         mp_frame_rgb = new cv::Mat {m_resolution, CV_8UC(c)};
         mp_frame_fp  = new cv::Mat {m_resolution, CV_32FC(c)};
+        data_lock.unlock();
     
+        // main loop
         size_t bytes_read {0};
         chrono::milliseconds sleep_time {m_check_interval};
         timeval timeout {
@@ -288,44 +312,50 @@ void AndroidBot::getframes_process()
             if (!mp_v4l2_device->isReadable(&timeout)) {
                 cerr << "--- ERROR (getframes_process): device "
                      << m_v4l2_dev_name << " timeout\n";
-                return;
+                break;
             }
+            data_lock.lock();
             bytes_read = mp_v4l2_device->read(
                 mp_v4l2_buffer,
                 m_v4l2_buf_size
             );
             if (bytes_read != m_v4l2_buf_size) {
+                data_lock.unlock();
                 cerr << "--- ERROR (getframes_process): failed to read from "
                      << m_v4l2_dev_name << endl;
-                return;
+                break;
             }
             process_frame();
+            data_lock.unlock();
             this_thread::sleep_for(sleep_time);
         }
     }
     catch (const exception& e) {
 		cerr << "--- ERROR (getframes_process): unhandled exception:\n"
              << e.what() << endl;
-        m_bot_state = stopped;
 	}
 	catch (...) {
 		cerr << "--- ERROR (getframes_process): unknown excepition type.\n";
-        m_bot_state = stopped;
 	}
+    data_lock.lock();
+    m_bot_state = stopped;
+    data_lock.unlock();
 }
 
 void AndroidBot::console_process()
 {
+    // this thread is not supposed to change object data directly
+    // so it doesn't lock except in case of exit or exception
     try { // each thread requires its own exception handling
         string user_cmd;
         while (m_bot_state == running)
         {
             cout << "BOT>";
             cin  >> user_cmd;
-            if ("stop" == user_cmd)
-                m_bot_state = stopped;
-            else if ("d" == user_cmd) {
-                // TEST
+            if ("stop" == user_cmd) break;
+
+            // TEST
+            if ("d" == user_cmd) {
                 cv::TickMeter tickMeter;
                 tickMeter.start();
                 double prob = detect_image(0);
@@ -333,24 +363,28 @@ void AndroidBot::console_process()
                 cout << "detection probability: " << prob << endl
                      << "time spend: " << tickMeter.getTimeSec() << "s" << endl;
             }
+            // TEST
+
             else
-                cout << "Unknown command: "
-                     << user_cmd << endl;
+                cout << "Unknown command: " << user_cmd << endl;
         }
     }
     catch (const exception& e) {
 		cerr << "--- ERROR (console_process): unhandled exception:\n"
              << e.what() << endl;
-        m_bot_state = stopped;
     }
 	catch (...) {
 		cerr << "--- ERROR (console_process): unknown excepition type.\n";
-        m_bot_state = stopped;
 	}
+    unique_lock<mutex> data_lock {m_mutex_all};
+    m_bot_state = stopped;
+    data_lock.unlock();
 }
 
 void AndroidBot::process_frame()
 {
+    // data is not locked in this function
+    // it must be locked by caller
     int channels;
     cv::ColorConversionCodes convert_type;
     if (m_force_greyscale) {
@@ -379,8 +413,11 @@ void AndroidBot::process_frame()
 
 double AndroidBot::detect_image(idx_type idx)
 {
-    double result;
-    cv::Mat frame, match_result;
+    // this function does not change object data
+    // but we lock while copying frame into local variable
+    // to prevent image distortion from getframes thread
+    cv::Mat frame;
+    unique_lock<mutex> data_lock {m_mutex_all};
     if (!m_force_greyscale && 1 == m_src_images[idx].channels())
         cv::cvtColor(
             *mp_frame_fp,
@@ -388,7 +425,11 @@ double AndroidBot::detect_image(idx_type idx)
             cv::COLOR_RGB2GRAY
         );
     else
-        frame = *mp_frame_fp;
+        frame = mp_frame_fp->clone();
+    data_lock.unlock();
+
+    double detection;
+    cv::Mat match_result;
     cv::matchTemplate(
         frame,
         m_src_images[idx],
@@ -396,6 +437,6 @@ double AndroidBot::detect_image(idx_type idx)
         cv::TM_CCORR_NORMED,
         m_src_masks[idx].empty() ? cv::noArray() : m_src_masks[idx]
     );
-    cv::minMaxLoc(match_result, nullptr, &result);
-    return result;
+    cv::minMaxLoc(match_result, nullptr, &detection);
+    return detection;
 }

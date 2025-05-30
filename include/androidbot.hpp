@@ -7,6 +7,7 @@
 
 #pragma once
 #include <cstddef>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <opencv2/core/types.hpp>
 #include <opencv2/core/mat.hpp>
@@ -40,6 +41,8 @@ protected:
 		return detect_image(m_src_img_map[image_name]);
 	}
 	
+	mutex m_mutex_all; // global mutex
+
 	vector<cv::Mat>       m_src_images;  // library of images to search for
 	vector<cv::Mat>       m_src_masks;   // masks for each image
 	map<string, idx_type> m_src_img_map; // image library index
