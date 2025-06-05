@@ -9,6 +9,8 @@
 #include "consolecmd.hpp"
 #include "opencv2/core.hpp"
 #include "opencv2/core/mat.hpp"
+#include "opencv2/imgproc.hpp"
+#include "opencv2/imgcodecs.hpp"
 
 #include <fcntl.h>
 #include <iostream>
@@ -17,8 +19,6 @@
 #include <chrono>
 #include <thread>
 #include <algorithm>
-#include <opencv2/opencv.hpp>
-#include <opencv2/imgcodecs.hpp>
 
 AndroidBot::AndroidBot(const json &settings)
 {
@@ -39,10 +39,10 @@ AndroidBot::AndroidBot(const json &settings)
             return;
         }
         m_scale_factor = static_cast<double>(image.cols);
-        image = cv::imread(settings.at("src_reference_img"));
+        image = cv::imread(settings.at("lib_reference_img"));
         if (image.empty()) {
             cerr << "--- ERROR: failed to read reference image "
-                 << settings.at("src_reference_img") << endl;
+                 << settings.at("lib_reference_img") << endl;
             return;
         }
         m_scale_factor /= static_cast<double>(image.cols);
@@ -73,12 +73,12 @@ AndroidBot::AndroidBot(const json &settings)
 
     // search images library
     bool img_collected {false};
-    i_key = settings.find("src_images");
+    i_key = settings.find("lib_images");
     if (i_key != i_eof) {
         auto img_count = i_key->size();
         if (img_count > 0) {
-            m_src_images.reserve(img_count);
-            m_src_masks .reserve(img_count);
+            m_lib_images.reserve(img_count);
+            m_lib_masks .reserve(img_count);
             img_collected = collect_images(
                 *i_key,
                 m_force_greyscale
@@ -117,7 +117,11 @@ AndroidBot::AndroidBot(const json &settings)
         return;
     }
 
-    m_bot_state = initialized;
+    // bot state init
+    mp_state = m_bot_states.find(DEF_INITIAL_STATE);
+    register_states(); // ancestor implemented states
+
+    m_bot_status = initialized;
 }
 
 AndroidBot::~AndroidBot()
@@ -127,6 +131,18 @@ AndroidBot::~AndroidBot()
     if (mp_frame_yuv)   delete   mp_frame_yuv;
     if (mp_frame_rgb)   delete   mp_frame_rgb;
     if (mp_frame_fp)    delete   mp_frame_fp;
+}
+
+void AndroidBot::set_sate(const string& new_state)
+{
+    mp_state = m_bot_states.find(new_state);
+    if (mp_state != m_bot_states.end()) return;
+    // critical bot program failure
+    cerr << "--- ERROR: failed to set unknown state '"
+         << new_state << "'\n";
+    unique_lock<mutex> data_lock {m_mutex_all};
+    m_bot_status = stopped;
+    data_lock.unlock();
 }
 
 bool AndroidBot::collect_images(const json& filenames, bool force_gs)
@@ -169,7 +185,7 @@ bool AndroidBot::collect_images(const json& filenames, bool force_gs)
         }
         else
             image.release();
-        m_src_masks.push_back(image);
+        m_lib_masks.push_back(image);
 
         if (force_gs && image_scaled.channels() > 1)
             cvtColor(
@@ -184,15 +200,15 @@ bool AndroidBot::collect_images(const json& filenames, bool force_gs)
             CV_32FC(image.channels()),
             UC_TO_FP_SCALE
         );
-        m_src_images.push_back(image);
-        m_src_img_map[img_filename] = i;
+        m_lib_images.push_back(image);
+        m_lib_img_map[img_filename] = i;
     }
     return true;
 }
 
 void AndroidBot::run()
 {
-    if (m_bot_state != initialized) {
+    if (m_bot_status != initialized) {
         cerr << "--- ERROR: can't start uninitialized bot\n";
         return;
     }
@@ -211,19 +227,27 @@ void AndroidBot::run()
     data_lock.lock(); // to be sure that adb_thread allready got data
     adb_thread.detach();
     data_lock.unlock();
-    if (m_bot_state == stopped) return;
+    if (m_bot_status == stopped) return;
 
     // start V4L2 capture and console UI
-    m_bot_state = running;
+    m_bot_status = running;
     cout << " - starting V4L2 capture from "
          << m_v4l2_dev_name << "\n";
     thread gf_thread(&AndroidBot::getframes_process, this);
     cout << "Bot is running. Enter 'stop' to terminate.\n";
     thread ui_thread(&AndroidBot::console_process, this);
 
+    // start bot program
+    state_itype term_state {m_bot_states.find(TERMINATION_STATE)};
+	while (mp_state != term_state && m_bot_status == running)
+        program(); // ancestor implemented state switch behavior
+
     // normal termination
+    data_lock.lock();
+    m_bot_status = stopped;
+    data_lock.unlock();
     gf_thread.join();
-    ui_thread.join();
+    ui_thread.detach(); // may stack on user input
     cout << "Bot stopped.\n";
 }
 
@@ -265,7 +289,7 @@ void AndroidBot::adb_process()
 	}
     // can't stop the bot after detach but can until we hold data lock
     if (data_lock) {
-        m_bot_state = stopped;
+        m_bot_status = stopped;
         data_lock.unlock();
     }
 }
@@ -308,7 +332,7 @@ void AndroidBot::getframes_process()
             max(1l, m_check_interval / 500),
             0
         };
-        while (m_bot_state == running)
+        while (m_bot_status == running)
         {
             if (!mp_v4l2_device->isReadable(&timeout)) {
                 cerr << "--- ERROR (getframes_process): device "
@@ -339,7 +363,7 @@ void AndroidBot::getframes_process()
 		cerr << "--- ERROR (getframes_process): unknown excepition type.\n";
 	}
     data_lock.lock();
-    m_bot_state = stopped;
+    m_bot_status = stopped;
     data_lock.unlock();
 }
 
@@ -349,7 +373,7 @@ void AndroidBot::console_process()
     // so it doesn't lock except in case of exit or exception
     try { // each thread requires its own exception handling
         string user_cmd;
-        while (m_bot_state == running)
+        while (m_bot_status == running)
         {
             cout << "BOT>";
             cin  >> user_cmd;
@@ -378,7 +402,7 @@ void AndroidBot::console_process()
 		cerr << "--- ERROR (console_process): unknown excepition type.\n";
 	}
     unique_lock<mutex> data_lock {m_mutex_all};
-    m_bot_state = stopped;
+    m_bot_status = stopped;
     data_lock.unlock();
 }
 
@@ -420,7 +444,7 @@ double AndroidBot::detect_image(idx_type idx)
     // to prevent image distortion from getframes thread
     Mat frame;
     unique_lock<mutex> data_lock {m_mutex_all};
-    if (!m_force_greyscale && 1 == m_src_images[idx].channels())
+    if (!m_force_greyscale && 1 == m_lib_images[idx].channels())
         cvtColor(
             *mp_frame_fp,
             frame,
@@ -434,10 +458,10 @@ double AndroidBot::detect_image(idx_type idx)
     Mat match_result;
     matchTemplate(
         frame,
-        m_src_images[idx],
+        m_lib_images[idx],
         match_result,
         TM_CCORR_NORMED,
-        m_src_masks[idx].empty() ? noArray() : m_src_masks[idx]
+        m_lib_masks[idx].empty() ? noArray() : m_lib_masks[idx]
     );
     minMaxLoc(match_result, nullptr, &detection);
     return detection;

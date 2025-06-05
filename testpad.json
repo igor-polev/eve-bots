@@ -10,8 +10,8 @@
     "res_width"         : 1440,
     "res_height"        : 904,
     "res_reference_img" : "eve_ref_1440x904.png",
-    "src_reference_img" : "eve_ref_2880x1800.png",
-    "src_images" : [
+    "lib_reference_img" : "eve_ref_2880x1800.png",
+    "lib_images" : [
         "eve_ref_2880x1800.png",
         "eve_ref_2880x1800.png"
     ]

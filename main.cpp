@@ -82,7 +82,7 @@ int main(int argc, char* argv[])
 		json bot_settings = json::parse(config_file);
 		cout << " - config file '" << argv[1] << "' parsed\n";
 		AndroidBot bot(bot_settings);
-		if (bot.state() != AndroidBot::states::initialized) {
+		if (bot.status() != AndroidBot::statuses::initialized) {
 			cerr << "--- ERROR: failed to initialize bot.\n";
 			return -1;
 		}
@@ -105,6 +105,6 @@ int main(int argc, char* argv[])
 		cerr << "--- ERROR (main): unknown excepition type, terminating.\n";
 		return -1;
 	}
-	kill(0, SIGTERM); // kill is needed to terminate detached thread
+	kill(0, SIGTERM); // kill is needed to terminate detached threads
 	return 0; // never reached
 }
