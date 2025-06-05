@@ -14,12 +14,6 @@ class EveMinerBot : private AndroidBot {
 public:
 	EveMinerBot() = delete;
 	EveMinerBot(const json &settings) : AndroidBot(settings) {};
-	virtual void program();
-private:
-	enum miner_states {
-		unknown,
-		termination
-	};
-	// unknown state is a default begining of the program
-	miner_states m_state {unknown};
+	void register_states() override;
+	void program() override;
 };

@@ -7,9 +7,12 @@
 
 #include "eveminerbot.hpp"
 
-#include <iostream>
+void EveMinerBot::register_states() override
+{
 
-void EveMinerBot::program()
+}
+
+void EveMinerBot::program() override
 {
 
 }
