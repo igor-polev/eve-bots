@@ -36,17 +36,32 @@ public:
 	}
 protected:
 	// constants & types
-	constexpr static const int   V4L2_FPS_DEFAULT  {30};
-	constexpr static const long  ADB_WAIT_DEFAULT  {5};
-    constexpr static const float UC_TO_FP_SCALE    {1.0 / 255.0};
-	constexpr static const char* DEF_INITIAL_STATE {"unknown"};
-	constexpr static const char* TERMINATION_STATE {"termination"};
+	constexpr static const int    V4L2_FPS_DEFAULT  {30};
+	constexpr static const long   ADB_WAIT_DEFAULT  {5};
+    constexpr static const double UC_TO_FP_SCALE    {1.0 / 255.0};
+    constexpr static const double DEF_THRESHOLD     {0.8};
+	constexpr static const char*  DEF_INITIAL_STATE {"UNKNOWN"};
+	constexpr static const char*  TERMINATION_STATE {"TERMINATION"};
 	typedef vector<cv::Mat>::size_type idx_type;
 	typedef set<string>::iterator      state_itype;
+	typedef pair<state_itype, bool>    streg_type;
+
 	// image detection
-	double detect_image(idx_type idx);
-	inline double detect_image(string image_name) {
-		return detect_image(m_lib_img_map[image_name]);
+	bool detect_image(
+		idx_type   idx,
+		double    *pCertainty = nullptr,
+		cv::Point *pLocation  = nullptr
+	);
+	inline bool detect_image(
+		const string &image_name,
+		double    *pCertainty = nullptr,
+		cv::Point *pLocation  = nullptr)
+	{
+		return detect_image(
+			m_lib_img_map[image_name],
+			pCertainty,
+			pLocation
+		);
 	}
 	// bot state manipulation
 	inline const string& state() const noexcept {
@@ -55,11 +70,15 @@ protected:
 	inline bool has_state(const string& new_state) const {
 		return m_bot_states.find(new_state) != m_bot_states.end();
 	}
-	inline bool reg_state(const string& new_state) {
-		if (has_state(new_state)) return false; 
-		return get<bool>(m_bot_states.insert(new_state));
+	inline streg_type reg_state(const string& new_state) {
+		if (has_state(new_state))
+			return streg_type(nullptr, false); 
+		return m_bot_states.insert(new_state);
 	}
-	void set_sate (const string& new_state);
+	void set_state (const char* new_state);
+	inline void set_sate (const string& new_state) {
+		set_state(new_state.c_str());
+	};
 	// ancestor interface - must be implemented in child class
 	virtual void register_states() {}; // add implemented states using reg_state()
 	virtual void program() {};         // the program of the bot
@@ -83,7 +102,8 @@ private:
 	string       m_adb_serial;      // serial number of Android device
 	string       m_v4l2_dev_name;   // v4l2 video device path, for ex.: /dev/video7
 	cv::Size     m_resolution;      // user-defined resolution of video stream
-	double       m_scale_factor;    // scaling factor form search images to stream resolution 
+	double       m_scale_factor;    // scaling factor form search images to stream resolution
+	double       m_threshold;       // detection threshold 
 	int          m_adb_fps;         // user-defined FPS of video stream
 	long         m_check_interval;  // bot screen check interval in milliseconds
 	long         m_adb_wait_for;    // time to wait for ADB to init in seconds

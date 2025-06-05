@@ -9,6 +9,7 @@
 #include "consolecmd.hpp"
 #include "opencv2/core.hpp"
 #include "opencv2/core/mat.hpp"
+#include "opencv2/core/types.hpp"
 #include "opencv2/imgproc.hpp"
 #include "opencv2/imgcodecs.hpp"
 
@@ -70,6 +71,9 @@ AndroidBot::AndroidBot(const json &settings)
     i_key = settings.find("force_greyscale");
     if (i_key != i_eof) m_force_greyscale = *i_key;
     else                m_force_greyscale = false;
+    i_key = settings.find("detect_threshold");
+    if (i_key != i_eof) m_threshold = *i_key;
+    else                m_threshold = DEF_THRESHOLD;
 
     // search images library
     bool img_collected {false};
@@ -133,7 +137,7 @@ AndroidBot::~AndroidBot()
     if (mp_frame_fp)    delete   mp_frame_fp;
 }
 
-void AndroidBot::set_sate(const string& new_state)
+void AndroidBot::set_state(const char* new_state)
 {
     mp_state = m_bot_states.find(new_state);
     if (mp_state != m_bot_states.end()) return;
@@ -436,7 +440,10 @@ void AndroidBot::process_frame()
         cerr << "--- ERROR (process_frame): failed to save frame\n";
 }
 
-double AndroidBot::detect_image(idx_type idx)
+bool AndroidBot::detect_image(
+    idx_type   idx,
+    double    *pCertainty, // if function returns false, *pCertainty is kept unchanged
+    cv::Point *pLocation)  // if function returns false, *pLocation is kept unchanged
 {
     using namespace cv;
     // this function does not change object data
@@ -454,8 +461,9 @@ double AndroidBot::detect_image(idx_type idx)
         frame = mp_frame_fp->clone();
     data_lock.unlock();
 
-    double detection;
-    Mat match_result;
+    double match_certainty;
+    Point  match_location;
+    Mat    match_result;
     matchTemplate(
         frame,
         m_lib_images[idx],
@@ -463,6 +471,21 @@ double AndroidBot::detect_image(idx_type idx)
         TM_CCORR_NORMED,
         m_lib_masks[idx].empty() ? noArray() : m_lib_masks[idx]
     );
-    minMaxLoc(match_result, nullptr, &detection);
-    return detection;
+    minMaxLoc(
+        match_result,
+        nullptr,
+        &match_certainty,
+        nullptr,
+        &match_location
+    );
+    if (match_certainty < m_threshold)
+        return false;
+    if (pLocation) {
+        match_location.x += m_lib_images[idx].cols / 2;
+        match_location.y += m_lib_images[idx].rows / 2;
+        *pLocation  = match_location;
+    };
+    if (pCertainty)
+        *pCertainty = match_certainty;
+    return true;
 }
