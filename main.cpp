@@ -11,8 +11,7 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 
-#include "consolecmd.hpp"
-#include "androidbot.hpp"
+#include "eveminerbot.hpp"
 
 using json = nlohmann::json;
 using namespace std;
@@ -36,43 +35,16 @@ int main(int argc, char* argv[])
 
 		if (argc < 2) {
 			cout << "Bad arguments. See usage below.\n"
-				<< _usage_str << endl;
+				 << _usage_str << endl;
 			return -1;
 		}
-		cout << "Checking prerequisites...\n";
-		ConsoleCmd command;
-		string cmd_list[] {
-			"dkms",
-			"v4l2loopback-ctl",
-			"v4l2-ctl",
-			"scrcpy",
-			"sudo"
-		};
-		for (string cmd : cmd_list) {
-			command = cmd + " --help";
-			if (!command.available()) {
-				cout << cmd << " is not available. See usage below.\n"
-					<< _usage_str << endl;
-				return -1;
-			}
-			cout << " - " << cmd << " present\n";
-		}
-		command = "dkms status | grep v4l2loopback";
-		if (!command.has_output()) {
-			cout << " - v4l2loopback kernel module not found. See usage below.\n"
-				<< _usage_str << endl;
-			return -1;
-		}
-		cout << " - v4l2loopback kernel module detected\n";
-		cout << "Validating sudo command...\n";
-		command = "sudo --validate";
-		if (0 != command.execute()) {
-			cerr << "--- ERROR: failed to validate sudo command.\n";
-			return -1;
+		if (string(argv[1]) == "--help") {
+			cout << _usage_str << endl;
+			return 0;
 		}
 
 		// start bot
-		cout << "Configuring bot...\n";
+		cout << "Reading config file...\n";
 		ifstream config_file(argv[1]); // first argument must be JSON config file
 		if (!config_file.is_open()) {
 			cerr << "--- ERROR: faild to open config file '"
@@ -81,7 +53,7 @@ int main(int argc, char* argv[])
 		}
 		json bot_settings = json::parse(config_file);
 		cout << " - config file '" << argv[1] << "' parsed\n";
-		AndroidBot bot(bot_settings);
+		EveMinerBot bot(bot_settings);
 		if (bot.status() != AndroidBot::statuses::initialized) {
 			cerr << "--- ERROR: failed to initialize bot.\n";
 			return -1;

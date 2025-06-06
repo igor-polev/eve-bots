@@ -10,6 +10,7 @@
     "detect_threshold"  : 0.75,
     "res_width"         : 1440,
     "res_height"        : 904,
+    "img_lib_dir"       : "/home/igor/Git/eve_bots/img_lib/",
     "res_reference_img" : "eve_ref_1440x904.png",
     "lib_reference_img" : "eve_ref_2880x1800.png",
     "lib_images" : [

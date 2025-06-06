@@ -9,7 +9,7 @@
 #include "androidbot.hpp"
 #include <chrono>
 
-class EveMinerBot : private AndroidBot {
+class EveMinerBot : public AndroidBot {
 public:
 	EveMinerBot() = delete;
 	EveMinerBot(const json &settings);

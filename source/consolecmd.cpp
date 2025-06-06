@@ -8,7 +8,6 @@
 #include "consolecmd.hpp"
 
 #include <stdexcept>
-#include <string>
 
 bool ConsoleCmd::has_output() const
 {

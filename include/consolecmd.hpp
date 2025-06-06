@@ -27,11 +27,13 @@ public:
     };
     const string& to_string() const { return *this; };
     int execute() const {
-        cout << flush;
+        cout << flush; // required befor 'system' call
         return system(c_str());
     };
     bool available() const {
+        //string exec_cmd { *this + " &> /dev/null" };
         string exec_cmd { *this + " &> /dev/null" };
+        cout << flush; // required befor 'system' call
         return (0 == system(exec_cmd.c_str()));
     };
     bool has_output() const;

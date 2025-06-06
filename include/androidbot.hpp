@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 #include <set>
+
 #include <nlohmann/json.hpp>
 #include "opencv2/core/types.hpp"
 #include "opencv2/core/mat.hpp"
@@ -88,6 +89,7 @@ private:
 	size_t       m_v4l2_buf_size {0};
 	V4l2Capture *mp_v4l2_device  {nullptr};
 	// user defined settings
+	string       m_img_lib_dir;     // path to image library, / at the end is required
 	string       m_adb_name;        // user friendly name of Android device
 	string       m_adb_serial;      // serial number of Android device
 	string       m_v4l2_dev_name;   // v4l2 video device path, for ex.: /dev/video7

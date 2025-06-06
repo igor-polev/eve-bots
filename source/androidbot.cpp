@@ -13,7 +13,6 @@
 #include "opencv2/imgproc.hpp"
 #include "opencv2/imgcodecs.hpp"
 
-#include <fcntl.h>
 #include <iostream>
 #include <mutex>
 #include <string>
@@ -23,6 +22,38 @@
 
 AndroidBot::AndroidBot(const json &settings)
 {
+    static const char* help_text = "Run with --help option for detailes.\n";
+
+    // system prerequisites
+    cout << "Checking prerequisites...\n";
+    ConsoleCmd command;
+    string cmd_list[] {
+        "v4l2loopback-ctl",
+        "v4l2-ctl",
+        "scrcpy",
+        "sudo"
+    };
+    for (string cmd : cmd_list) {
+        command = cmd + " --help";
+        if (!command.available()) {
+            cout << cmd << " is not available.\n" << help_text;
+            return;
+        }
+        cout << " - " << cmd << " present\n";
+    }
+    cout << "Validating sudo command...\n";
+    command = "sudo --validate";
+    if (0 != command.execute()) {
+        cerr << "--- ERROR: failed to validate sudo command.\n";
+        return;
+    }
+    command = "sudo -n dkms status | grep v4l2loopback";
+    if (!command.has_output()) {
+        cout << " - v4l2loopback kernel module not found.\n" << help_text;
+        return;
+    }
+    cout << " - v4l2loopback kernel module detected\n";
+
     // mandatory JSON settings
     try {
         m_adb_serial        = settings.at("adb_serial");
@@ -30,17 +61,22 @@ AndroidBot::AndroidBot(const json &settings)
         m_check_interval    = settings.at("check_interval");
         m_resolution.width  = settings.at("res_width");
         m_resolution.height = settings.at("res_height");
+        m_img_lib_dir       = settings.at("img_lib_dir");
 
         // scale factor calculation
         cv::Mat image, image_scaled;
-        image = cv::imread(settings.at("res_reference_img"));
+        image = cv::imread(m_img_lib_dir +
+            string(settings.at("res_reference_img"))
+        );
         if (image.empty()) {
             cerr << "--- ERROR: failed to read reference image "
                  << settings.at("res_reference_img") << endl;
             return;
         }
         m_scale_factor = static_cast<double>(image.cols);
-        image = cv::imread(settings.at("lib_reference_img"));
+        image = cv::imread(m_img_lib_dir +
+            string(settings.at("lib_reference_img"))
+        );
         if (image.empty()) {
             cerr << "--- ERROR: failed to read reference image "
                  << settings.at("lib_reference_img") << endl;
@@ -90,7 +126,7 @@ AndroidBot::AndroidBot(const json &settings)
         }
     }
     if (!img_collected) {
-        cerr << "--- ERROR: no images to search found in config file" << endl;
+        cerr << "--- ERROR: faild to read image library.\n";
         return;
     }
 
@@ -147,7 +183,10 @@ bool AndroidBot::collect_images(const json& filenames, bool force_gs)
     for (idx_type i = 0; i < img_count; i++)
     {
         img_filename = filenames[i];
-        image = imread(img_filename, IMREAD_UNCHANGED);
+        image = imread(
+            m_img_lib_dir + img_filename,
+            IMREAD_UNCHANGED
+        );
         if (image.empty()) {
             cerr << "--- ERROR: failed to read image "
                  << img_filename << endl;
