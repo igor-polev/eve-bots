@@ -30,10 +30,8 @@ public:
   	AndroidBot() = delete;
     AndroidBot(const json &settings);
     virtual ~AndroidBot();
+	statuses status() const noexcept;
 	void run();
-	inline const statuses status() const noexcept {
-		return m_bot_status;
-	}
 protected:
 	// constants & types
 	constexpr static const int    V4L2_FPS_DEFAULT  {30};
@@ -48,43 +46,36 @@ protected:
 
 	// image detection
 	bool detect_image(
+		const string& image_name,
+		cv::Point *pLocation  = nullptr,
+		double    *pCertainty = nullptr);
+	bool detect_image(
 		idx_type   idx,
-		double    *pCertainty = nullptr,
-		cv::Point *pLocation  = nullptr
-	);
-	inline bool detect_image(
-		const string &image_name,
-		double    *pCertainty = nullptr,
-		cv::Point *pLocation  = nullptr)
-	{
-		return detect_image(
-			m_lib_img_map[image_name],
-			pCertainty,
-			pLocation
-		);
-	}
+		cv::Point *pLocation  = nullptr,
+		double    *pCertainty = nullptr);
+	
+	// member access
+	long check_interval() const noexcept;
+
 	// bot state manipulation
-	inline const string& state() const noexcept {
-		return *mp_state;
-	}
-	inline bool has_state(const string& new_state) const {
-		return m_bot_states.find(new_state) != m_bot_states.end();
-	}
-	inline streg_type reg_state(const string& new_state) {
-		if (has_state(new_state))
-			return streg_type(nullptr, false); 
-		return m_bot_states.insert(new_state);
-	}
-	void set_state (const char* new_state);
-	inline void set_sate (const string& new_state) {
-		set_state(new_state.c_str());
-	};
+	const string& state()     const noexcept;
+	state_itype   state_ptr() const noexcept;
+	state_itype has_state(const string& new_state) const;
+	state_itype has_state(const char*   new_state) const;
+	streg_type  reg_state(const string& new_state);
+	streg_type  reg_state(const char*   new_state);
+	bool set_state(const string& new_state);
+	bool set_state(const char*   new_state);
+	void set_state(state_itype   new_state_ptr) noexcept; // unsafe pointer operation
+
 	// ancestor interface - must be implemented in child class
-	virtual void register_states() {}; // add implemented states using reg_state()
-	virtual void program() {};         // the program of the bot
+	virtual bool new_states() {return true;} // register new states
+	virtual void program()    {}             // define bot program
 	
 	// global mutex
 	mutex m_mutex_all;
+private:
+	statuses m_bot_status {uninitialized};
 	// image processing data
 	vector<cv::Mat>       m_lib_images;  // library of images to search for
 	vector<cv::Mat>       m_lib_masks;   // masks for each image
@@ -92,11 +83,10 @@ protected:
 	cv::Mat     *mp_frame_fp     {nullptr};
 	cv::Mat     *mp_frame_rgb    {nullptr};
 	cv::Mat     *mp_frame_yuv    {nullptr};
+	// V4L2 data
 	char        *mp_v4l2_buffer  {nullptr};
-private:
 	size_t       m_v4l2_buf_size {0};
 	V4l2Capture *mp_v4l2_device  {nullptr};
-	statuses     m_bot_status    {uninitialized};
 	// user defined settings
 	string       m_adb_name;        // user friendly name of Android device
 	string       m_adb_serial;      // serial number of Android device
@@ -120,9 +110,87 @@ private:
 	bool collect_images(  // load image library
 		const json& filenames,
 		bool force_gs
-	); 
+	);
 	// threads
 	void adb_process();
 	void getframes_process();
 	void console_process();
 };
+
+///////////////////////////////////////////////////////////////
+// inline methods implementation
+
+inline AndroidBot::statuses AndroidBot::status() const noexcept
+{
+	return m_bot_status;
+};
+
+inline bool AndroidBot::detect_image(
+	const string& image_name,
+	cv::Point *pLocation,
+	double    *pCertainty)
+{
+	return detect_image(
+		m_lib_img_map[image_name],
+		pLocation,
+		pCertainty
+	);
+}
+
+inline const string& AndroidBot::state() const noexcept
+{
+	return *mp_state;
+}
+inline AndroidBot::state_itype AndroidBot::state_ptr() const noexcept
+{
+	return mp_state;
+}
+
+inline AndroidBot::state_itype AndroidBot::has_state(const char* new_state) const
+{
+	state_itype it = m_bot_states.find(new_state);
+	if (it == m_bot_states.end())
+		return static_cast<state_itype>(nullptr);
+	else
+		return it;
+}
+inline AndroidBot::state_itype AndroidBot::has_state(const string& new_state) const
+{
+	return has_state(new_state.c_str());
+}
+
+inline AndroidBot::streg_type AndroidBot::reg_state(const char* new_state)
+{
+    auto it = m_bot_states.find(new_state);
+    if (it != m_bot_states.end()) // already registered
+        return streg_type(it, true); 
+    return m_bot_states.insert(new_state);
+}
+inline AndroidBot::streg_type AndroidBot::reg_state(const string& new_state)
+{
+	return reg_state(new_state.c_str());
+}
+
+inline void AndroidBot::set_state(state_itype new_state_ptr) noexcept
+{  
+	// warning: unsafe pointer operation
+	// new_state_ptr may point outside of m_bot_states
+	mp_state = new_state_ptr;
+}
+inline bool AndroidBot::set_state(const char* new_state)
+{
+    mp_state = m_bot_states.find(new_state);
+    if (mp_state != m_bot_states.end())
+		return true;
+    else
+		return false;
+}
+inline bool AndroidBot::set_state(const string& new_state)
+{
+	return set_state(new_state.c_str());
+}
+
+inline long AndroidBot::check_interval() const noexcept
+{
+	return m_check_interval;
+}

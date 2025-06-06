@@ -7,13 +7,22 @@
 
 #pragma once
 #include "androidbot.hpp"
-
-using json = nlohmann::json;
+#include <chrono>
 
 class EveMinerBot : private AndroidBot {
 public:
 	EveMinerBot() = delete;
-	EveMinerBot(const json &settings) : AndroidBot(settings) {};
-	void register_states() override;
-	void program() override;
+	EveMinerBot(const json &settings);
+	bool new_states() override;
+	void program()    override;
+private:
+	// general parameters
+	chrono::milliseconds m_wait_some {1000};
+	// images positions cache
+	cv::Point
+		pnt_undock_btn {0, 0};
+	// bot states cache
+	state_itype
+		stUNKNOWN {nullptr},
+		stDOCKED  {nullptr};
 };

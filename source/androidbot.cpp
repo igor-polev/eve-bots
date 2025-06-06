@@ -122,10 +122,11 @@ AndroidBot::AndroidBot(const json &settings)
     }
 
     // bot state init
-    mp_state = m_bot_states.find(DEF_INITIAL_STATE);
-    register_states(); // ancestor implemented states
-
-    m_bot_status = initialized;
+    if (new_states()) // ancestor states registration
+    {
+        mp_state = m_bot_states.find(DEF_INITIAL_STATE);
+        m_bot_status = initialized;
+    }
 }
 
 AndroidBot::~AndroidBot()
@@ -135,18 +136,6 @@ AndroidBot::~AndroidBot()
     if (mp_frame_yuv)   delete   mp_frame_yuv;
     if (mp_frame_rgb)   delete   mp_frame_rgb;
     if (mp_frame_fp)    delete   mp_frame_fp;
-}
-
-void AndroidBot::set_state(const char* new_state)
-{
-    mp_state = m_bot_states.find(new_state);
-    if (mp_state != m_bot_states.end()) return;
-    // critical bot program failure
-    cerr << "--- ERROR: failed to set unknown state '"
-         << new_state << "'\n";
-    unique_lock<mutex> data_lock {m_mutex_all};
-    m_bot_status = stopped;
-    data_lock.unlock();
 }
 
 bool AndroidBot::collect_images(const json& filenames, bool force_gs)
@@ -242,9 +231,15 @@ void AndroidBot::run()
     thread ui_thread(&AndroidBot::console_process, this);
 
     // start bot program
-    state_itype term_state {m_bot_states.find(TERMINATION_STATE)};
-	while (mp_state != term_state && m_bot_status == running)
+    state_itype term_state  {m_bot_states.find(TERMINATION_STATE)},
+                undef_state {m_bot_states.end()};
+	while (mp_state != term_state && m_bot_status == running) {
+        if (mp_state == undef_state) {
+            cerr << "--- ERROR: undefined bot program state\n";
+            break;
+        }
         program(); // ancestor implemented state switch behavior
+    }
 
     // normal termination
     data_lock.lock();
@@ -442,8 +437,8 @@ void AndroidBot::process_frame()
 
 bool AndroidBot::detect_image(
     idx_type   idx,
-    double    *pCertainty, // if function returns false, *pCertainty is kept unchanged
-    cv::Point *pLocation)  // if function returns false, *pLocation is kept unchanged
+    cv::Point *pLocation,
+    double    *pCertainty)
 {
     using namespace cv;
     // this function does not change object data
