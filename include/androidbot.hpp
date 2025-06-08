@@ -7,18 +7,22 @@
 
 #pragma once
 #include <cstddef>
-#include <mutex>
 #include <string>
 #include <vector>
 #include <set>
-
+#include <map>
+#include <chrono>
+#include <mutex>
 #include <nlohmann/json.hpp>
+
 #include "opencv2/core/types.hpp"
 #include "opencv2/core/mat.hpp"
 #include "V4l2Capture.h"
 
 using namespace std;
-using json = nlohmann::json;
+using json     = nlohmann::json;
+using seconds  = chrono::seconds;
+using mseconds = chrono::milliseconds;
 
 class AndroidBot {
 public:
@@ -29,18 +33,19 @@ public:
 		stopped
 	};
   	AndroidBot() = delete;
-    AndroidBot(const json &settings);
+    AndroidBot(const char*   config_file);
+    AndroidBot(const string& config_file);
     virtual ~AndroidBot();
 	statuses status() const noexcept;
-	void run();
+	int run();
 protected:
 	// constants & types
-	constexpr static const int    V4L2_FPS_DEFAULT  {30};
-	constexpr static const long   ADB_WAIT_DEFAULT  {5};
-    constexpr static const double UC_TO_FP_SCALE    {1.0 / 255.0};
-    constexpr static const double DEF_THRESHOLD     {0.8};
-	constexpr static const char*  DEF_INITIAL_STATE {"UNKNOWN"};
-	constexpr static const char*  TERMINATION_STATE {"TERMINATION"};
+	constexpr static const int     V4L2_FPS_DEFAULT  {30};
+    constexpr static const double  UC_TO_FP_SCALE    {1.0 / 255.0};
+    constexpr static const double  DEF_THRESHOLD     {0.8};
+	constexpr static const seconds ADB_WAIT_DEFAULT  {5};
+	constexpr static const char*   DEF_INITIAL_STATE {"UNKNOWN"};
+	constexpr static const char*   TERMINATION_STATE {"TERMINATION"};
 	typedef vector<cv::Mat>::size_type idx_type;
 	typedef set<string>::iterator      state_itype;
 	typedef pair<state_itype, bool>    streg_type;
@@ -56,7 +61,7 @@ protected:
 		double    *pCertainty = nullptr);
 	
 	// member access
-	long check_interval() const noexcept;
+	mseconds check_interval() const noexcept;
 
 	// bot state manipulation
 	const string& state()     const noexcept;
@@ -73,9 +78,12 @@ protected:
 	virtual bool new_states() {return true;} // register new states
 	virtual void program()    {}             // define bot program
 	
-	// global mutex
-	mutex m_mutex_all;
+	// multi-threading
+	mutex m_mutex_all;     // all data write access
+	mutex m_mutex_threads; // threads execution ordering
+    unique_lock<mutex> m_run_lock {m_mutex_all, defer_lock};
 private:
+	int      m_ret_code   {0};
 	statuses m_bot_status {uninitialized};
 	// image processing data
 	vector<cv::Mat>       m_lib_images;  // library of images to search for
@@ -97,8 +105,8 @@ private:
 	double       m_scale_factor;    // scaling factor form search images to stream resolution
 	double       m_threshold;       // detection threshold 
 	int          m_adb_fps;         // user-defined FPS of video stream
-	long         m_check_interval;  // bot screen check interval in milliseconds
-	long         m_adb_wait_for;    // time to wait for ADB to init in seconds
+	mseconds     m_check_interval;  // bot screen check interval in milliseconds
+	seconds      m_adb_wait_for;    // time to wait for ADB to init in seconds
 	bool         m_dump_frames;     // dump each frame to file
 	bool         m_force_greyscale; // force image detection in greayscale mode
 	// bot (program) state
@@ -108,19 +116,23 @@ private:
 		TERMINATION_STATE
 	};
 	// internal methods
-	void process_frame(); // convert data from v4l2 buffer
-	bool collect_images(  // load image library
+	void console_ui();        // console user interface
+	void program_loop();      // bot program loop
+	void getframes_process(); // v4l2 data reading thread
+	void process_frame();     // convert data from v4l2 buffer
+	bool collect_images(      // load image library
 		const json& filenames,
 		bool force_gs
 	);
-	// threads
-	void adb_process();
-	void getframes_process();
-	void console_process();
 };
 
 ///////////////////////////////////////////////////////////////
 // inline methods implementation
+
+inline AndroidBot::AndroidBot(const string& config_file)
+{
+	AndroidBot(config_file.c_str());
+}
 
 inline AndroidBot::statuses AndroidBot::status() const noexcept
 {
@@ -192,7 +204,7 @@ inline bool AndroidBot::set_state(const string& new_state)
 	return set_state(new_state.c_str());
 }
 
-inline long AndroidBot::check_interval() const noexcept
+inline mseconds AndroidBot::check_interval() const noexcept
 {
 	return m_check_interval;
 }
