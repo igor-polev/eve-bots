@@ -530,10 +530,11 @@ void AndroidBot::process_frame()
         cerr << "--- ERROR (process_frame): failed to save frame\n";
 }
 
-bool AndroidBot::detect_image(
+int AndroidBot::detect_image(
     idx_type   idx,
     cv::Point *pLocation,
-    double    *pCertainty)
+    double    *pCertainty,
+    int        maxLocations)
 {
     using namespace cv;
     // this function does not change object data
@@ -551,31 +552,61 @@ bool AndroidBot::detect_image(
         frame = mp_frame_fp->clone();
     data_lock.unlock();
 
-    double match_certainty;
-    Point  match_location;
-    Mat    match_result;
+    Mat match_result;
     matchTemplate(
         frame,
         m_lib_images[idx],
         match_result,
-        TM_CCORR_NORMED,
+        TM_CCORR_NORMED, // if changed to TM_SQDIFF_NORMED methods,
+                                // don't forget to change code below 
         m_lib_masks[idx].empty() ? noArray() : m_lib_masks[idx]
     );
-    minMaxLoc(
-        match_result,
-        nullptr,
-        &match_certainty,
-        nullptr,
-        &match_location
-    );
-    if (match_certainty < m_threshold)
-        return false;
-    if (pLocation) {
-        match_location.x += m_lib_images[idx].cols / 2;
-        match_location.y += m_lib_images[idx].rows / 2;
-        *pLocation  = match_location;
+
+    // select best matches
+    Point  match_location;
+    double match_certainty;
+    Point image_center {
+        m_lib_images[idx].cols / 2,
+        m_lib_images[idx].rows / 2
     };
-    if (pCertainty)
-        *pCertainty = match_certainty;
-    return true;
+    Rect erase_area;
+    int x_offset = m_lib_images[idx].cols / 3,
+        y_offset = m_lib_images[idx].rows / 3,
+        v, // temporary calcuations storage
+        det_count {0},
+        steps {maxLocations - 1};
+    for (int i = 0; i <= steps; i++) {
+        minMaxLoc(  // change args order if TM_SQDIFF_NORMED
+            match_result,
+            nullptr,
+            &match_certainty,
+            nullptr,
+            &match_location
+        );
+        // "inverse" match_certainty if TM_SQDIFF_NORMED:
+        // match_certainty = 1.0 - match_certainty;
+        if (match_certainty < m_threshold)
+            break;
+        det_count++;
+        if (pLocation) {
+            pLocation[i] = match_location + image_center;
+        };
+        if (pCertainty)
+            pCertainty[i] = match_certainty;
+        // erase current match area - not required at last iteration
+        if (i < steps) {
+            v = match_location.x - x_offset;
+            erase_area.x = v < 0 ? 0 : v;
+            v = match_location.y - y_offset;
+            erase_area.y = v < 0 ? 0 : v;
+            v = match_location.x + m_lib_images[idx].cols + x_offset;
+            erase_area.width = (v < match_result.cols ?
+                v : match_result.cols - 1) - erase_area.x + 1;
+            v = match_location.y + m_lib_images[idx].rows + y_offset;
+            erase_area.height = (v < match_result.rows ?
+                v : match_result.rows - 1) - erase_area.y + 1;
+            match_result(erase_area) = 0.0; // 1.0 if TM_SQDIFF_NORMED
+        }
+    }
+    return det_count;
 }

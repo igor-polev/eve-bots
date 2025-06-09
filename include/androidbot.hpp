@@ -51,14 +51,16 @@ protected:
 	typedef pair<state_itype, bool>    streg_type;
 
 	// image detection
-	bool detect_image(
+	int detect_image(
 		const string& image_name,
-		cv::Point *pLocation  = nullptr,
-		double    *pCertainty = nullptr);
-	bool detect_image(
+		cv::Point *pLocation    = nullptr,
+		double    *pCertainty   = nullptr,
+		int        maxLocations = 1);
+	int detect_image(
 		idx_type   idx,
-		cv::Point *pLocation  = nullptr,
-		double    *pCertainty = nullptr);
+		cv::Point *pLocation    = nullptr,
+		double    *pCertainty   = nullptr,
+		int        maxLocations = 1);
 	
 	// member access
 	mseconds check_interval() const noexcept;
@@ -139,15 +141,17 @@ inline AndroidBot::statuses AndroidBot::status() const noexcept
 	return m_bot_status;
 };
 
-inline bool AndroidBot::detect_image(
+inline int AndroidBot::detect_image(
 	const string& image_name,
 	cv::Point *pLocation,
-	double    *pCertainty)
+	double    *pCertainty,
+	int        maxLocations)
 {
 	return detect_image(
 		m_lib_img_map[image_name],
 		pLocation,
-		pCertainty
+		pCertainty,
+		maxLocations
 	);
 }
 
