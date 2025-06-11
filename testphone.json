@@ -1,7 +1,7 @@
 {
     "adb_name"          : "Redmi8Pro",
     "adb_serial"        : "cilru8inmbjne6ln",
-    "v4l2_device"       : "/dev/video10",
+    "v4l2_device_num"   : 10,
     "adb_wait_for"      : 3,
     "adb_fps"           : 5,
     "check_interval"    : 800,
@@ -10,11 +10,10 @@
     "detect_threshold"  : 0.75,
     "res_width"         : 2336,
     "res_height"        : 1080,
-    "img_lib_dir"       : "/home/igor/Git/eve_bots/img_lib/",
+    "img_lib_dir"       : "/home/igor/EVE/eve_bot/img_lib/",
     "res_reference_img" : "eve_ref_2336x1080.png",
     "lib_reference_img" : "eve_ref_2880x1800.png",
     "lib_images" : [
-        "eve_ref_2880x1800.png",
-        "eve_ref_2880x1800.png"
+        "eve_undock_btn.png"
     ]
 }

@@ -13,6 +13,7 @@
 #include <map>
 #include <chrono>
 #include <mutex>
+#include <condition_variable>
 #include <nlohmann/json.hpp>
 
 #include "opencv2/core/types.hpp"
@@ -33,8 +34,7 @@ public:
 		stopped
 	};
   	AndroidBot() = delete;
-    AndroidBot(const char*   config_file);
-    AndroidBot(const string& config_file);
+    AndroidBot(const char* config_file); // this is the default constructor
     virtual ~AndroidBot();
 	statuses status() const noexcept;
 	int run();
@@ -68,10 +68,10 @@ protected:
 	// bot state manipulation
 	const string& state()     const noexcept;
 	state_itype   state_ptr() const noexcept;
-	state_itype has_state(const string& new_state) const;
-	state_itype has_state(const char*   new_state) const;
-	streg_type  reg_state(const string& new_state);
-	streg_type  reg_state(const char*   new_state);
+	state_itype   has_state(const string& new_state) const;
+	state_itype   has_state(const char*   new_state) const;
+	streg_type    reg_state(const string& new_state);
+	streg_type    reg_state(const char*   new_state);
 	bool set_state(const string& new_state);
 	bool set_state(const char*   new_state);
 	void set_state(state_itype   new_state_ptr) noexcept; // unsafe pointer operation
@@ -81,9 +81,8 @@ protected:
 	virtual void program()    {}             // define bot program
 	
 	// multi-threading
-	mutex m_mutex_all;     // all data write access
-	mutex m_mutex_threads; // threads execution ordering
-    unique_lock<mutex> m_run_lock {m_mutex_all, defer_lock};
+	mutex              m_mutex_all;
+	condition_variable m_notify;
 private:
 	int      m_ret_code   {0};
 	statuses m_bot_status {uninitialized};
@@ -102,7 +101,8 @@ private:
 	string       m_img_lib_dir;     // path to image library, / at the end is required
 	string       m_adb_name;        // user friendly name of Android device
 	string       m_adb_serial;      // serial number of Android device
-	string       m_v4l2_dev_name;   // v4l2 video device path, for ex.: /dev/video7
+	string       m_v4l2_dev_name;   // v4l2 video device name, for ex.: /dev/video7
+	unsigned     m_v4l2_dev_num;    // v4l2 video device number, for ex.: 7 for /dev/video7
 	cv::Size     m_resolution;      // user-defined resolution of video stream
 	double       m_scale_factor;    // scaling factor form search images to stream resolution
 	double       m_threshold;       // detection threshold 
@@ -130,11 +130,6 @@ private:
 
 ///////////////////////////////////////////////////////////////
 // inline methods implementation
-
-inline AndroidBot::AndroidBot(const string& config_file)
-{
-	AndroidBot(config_file.c_str());
-}
 
 inline AndroidBot::statuses AndroidBot::status() const noexcept
 {

@@ -1,7 +1,7 @@
 {
     "adb_name"          : "XiaomiPad6",
     "adb_serial"        : "2112b2b5",
-    "v4l2_device"       : "/dev/video10",
+    "v4l2_device_num"   : 10,
     "adb_wait_for"      : 3,
     "adb_fps"           : 5,
     "check_interval"    : 800,

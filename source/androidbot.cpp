@@ -8,6 +8,7 @@
 #include <iostream>
 #include <fstream>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <csignal>
 #include <unistd.h>
@@ -50,21 +51,21 @@ AndroidBot::AndroidBot(const char* config_file)
         cerr << "--- ERROR (AndroidBot): failed to validate sudo command.\n";
         return;
     }
-    cout << "Checking dkms status...\n";
+    cout << "Checking dkms status......";
     command = "sudo -n dkms status | grep v4l2loopback";
     if (!command.has_output()) {
-        cout << " - v4l2loopback kernel module not found.\n" << help_text;
+        cout << "\n - v4l2loopback kernel module not found.\n" << help_text;
         return;
     }
-    cout << " - v4l2loopback kernel module detected\n";
+    cout << "ok\n";
 
     // settings from JSON
     json settings;
     try {
-        cout << "Parsing config file...\n";
+        cout << "Parsing config file.......";
         ifstream json_file(config_file);
         if (!json_file.is_open()) {
-            cerr << "--- ERROR (AndroidBot): faild to open config file '"
+            cerr << "\n--- ERROR (AndroidBot): faild to open config file '"
                  << config_file << "'\n";
             return;
         }
@@ -73,39 +74,40 @@ AndroidBot::AndroidBot(const char* config_file)
 
         // mandatory JSON settings
         m_adb_serial        = settings.at("adb_serial");
-        m_v4l2_dev_name     = settings.at("v4l2_device");
+        m_v4l2_dev_num      = settings.at("v4l2_device_num");
         m_resolution.width  = settings.at("res_width");
         m_resolution.height = settings.at("res_height");
         m_img_lib_dir       = settings.at("img_lib_dir");
         string res_ref_img  = settings.at("res_reference_img"),
                lib_ref_img  = settings.at("lib_reference_img");
         m_check_interval = seconds(settings.at("check_interval"));
+        m_v4l2_dev_name = "/dev/video" + to_string(m_v4l2_dev_num);
 
         // scale factor calculation
         cv::Mat image;
         image = cv::imread(m_img_lib_dir + res_ref_img);
         if (image.empty()) {
-            cerr << "--- ERROR (AndroidBot): failed to read reference image "
+            cerr << "\n--- ERROR (AndroidBot): failed to read reference image "
                  << res_ref_img << endl;
             return;
         }
         m_scale_factor = static_cast<double>(image.cols);
         image = cv::imread(m_img_lib_dir + lib_ref_img);
         if (image.empty()) {
-            cerr << "--- ERROR (AndroidBot): failed to read reference image "
+            cerr << "\n--- ERROR (AndroidBot): failed to read reference image "
                  << lib_ref_img << endl;
             return;
         }
         m_scale_factor /= static_cast<double>(image.cols);
     }
     catch (const json::parse_error& e) {
-		cerr << "--- ERROR (AndroidBot): failed to parse config file '"
+		cerr << "\n--- ERROR (AndroidBot): failed to parse config file '"
 		     << config_file << "':\n"
              << e.what() << endl;
         return;
     }
     catch(const json::out_of_range& e) {
-		cerr << "--- ERROR (AndroidBot): required parameter is not found in config file:\n"
+		cerr << "\n--- ERROR (AndroidBot): required parameter is not found in config file:\n"
              << e.what() << endl;
         return;
     }
@@ -130,8 +132,10 @@ AndroidBot::AndroidBot(const char* config_file)
     i_key = settings.find("detect_threshold");
     if (i_key != i_eof) m_threshold = *i_key;
     else                m_threshold = DEF_THRESHOLD;
+    cout << "ok\n";
 
     // search images library
+    cout << "Loading images library....";
     bool img_collected {false};
     i_key = settings.find("lib_images");
     if (i_key != i_eof) {
@@ -146,44 +150,50 @@ AndroidBot::AndroidBot(const char* config_file)
         }
     }
     if (!img_collected) {
-        cerr << "--- ERROR (AndroidBot): faild to read image library.\n";
+        cerr << "\n--- ERROR (AndroidBot): faild to read image library.\n";
         return;
     }
+    cout << "ok\n";
 
     // V4L2 device setup
-    cout << "Preparing V4L2 device...\n";
+    cout << "Preparing V4L2 device.....";
     ConsoleCmd cmd {"sudo -n modprobe v4l2loopback"};
     if (0 != cmd.execute()) {
-        cerr << "--- ERROR (AndroidBot): failed to init v4l2loopback kernel module\n";
+        cerr << "\n--- ERROR (AndroidBot): failed to init v4l2loopback kernel module\n";
         return;
     }
     cmd = string("sudo -n v4l2loopback-ctl delete ")
-        + m_v4l2_dev_name
+        + to_string(m_v4l2_dev_num)
         + " &> /dev/null";
     cmd.execute();
     cmd = string("sudo -n v4l2loopback-ctl add ")
+        + to_string(m_v4l2_dev_num)
         + " --name " + m_adb_name
-        + " " + m_v4l2_dev_name
         + " &> /dev/null";
     if (0 != cmd.execute()) {
-        cerr << "--- ERROR (AndroidBot): failed to add V4L2 device "
+        cerr << "\n--- ERROR (AndroidBot): failed to add V4L2 device "
              << m_v4l2_dev_name << endl;
         return;
     }
     cmd = string("sudo v4l2-ctl --set-ctrl sustain_framerate=1")
         + " --device " + m_v4l2_dev_name;
     if (0 != cmd.execute()) {
-        cerr << "--- ERROR (AndroidBot): failed to set attribute of V4L2 device "
+        cerr << "\n--- ERROR (AndroidBot): failed to set attribute of V4L2 device "
              << m_v4l2_dev_name << endl;
         return;
     }
+    cout << "ok\n";
 
     // bot states init
-    if (new_states()) // ancestor states registration
-    {
-        mp_state = m_bot_states.find(DEF_INITIAL_STATE);
-        m_bot_status = initialized;
+    cout << "Initializing bot states...";
+    if (!new_states()) { // ancestor states registration
+        cerr << "\n--- ERROR (AndroidBot): failed to register bot states.\n";
+        return;
     }
+    cout << "ok\n";
+    mp_state = m_bot_states.find(DEF_INITIAL_STATE);
+    m_bot_status = initialized;
+    cout << "Bot initialized.\n";
 }
 
 AndroidBot::~AndroidBot()
@@ -273,7 +283,8 @@ int AndroidBot::run()
     string adb_log {m_adb_serial + "_log.txt"};
     int adb_output = open(
         adb_log.c_str(),
-        O_CREAT|O_TRUNC|O_WRONLY
+        O_CREAT|O_TRUNC|O_WRONLY,
+        S_IRWXU|S_IRWXG|S_IRWXO
     );
     if (!adb_output) {
         cerr << "--- ERROR (run): failed to create ADB log file\n";
@@ -287,7 +298,7 @@ int AndroidBot::run()
     if (adb_pid == 0) {
         // child ADB process
         string serial_opt {"--serial=" + m_adb_serial},
-               sink_opt   {"--sink=" + m_v4l2_dev_name},
+               sink_opt   {"--v4l2-sink=" + m_v4l2_dev_name},
                fps_opt    {"--max-fps=" + to_string(m_adb_fps)},
                size_opt   {"--max-size=" + to_string(
                    m_resolution.width > m_resolution.height ?
@@ -318,23 +329,30 @@ int AndroidBot::run()
     this_thread::sleep_for(m_adb_wait_for);
 
     // start threads
+    unique_lock<mutex> wait_lock {m_mutex_all};
     m_bot_status = running;
-    m_run_lock.lock();
     cout << " - starting V4L2 capture from "
          << m_v4l2_dev_name << "\n";
     thread getframes_thread(&AndroidBot::getframes_process, this);
-    m_run_lock.lock();   // waiting for getframes_thread to unlock
-    m_run_lock.unlock(); // following code doesn't require waiting
+    m_notify.wait(wait_lock);
+    wait_lock.unlock();
+    if (m_bot_status != running) return -1;
     cout << " - starting bot program loop\n";
     thread program_thread(&AndroidBot::program_loop, this);
 
     cout << "Bot is running.\n";
     console_ui();
+    cout << "Terminating bot...\n";
 
     // normal termination
+    cout << "(run) status = " << m_bot_status << endl;
+    cout << " - waiting for program to terminate...\n";
     program_thread  .join();
+    cout << " - waiting for V4l2 capture to terminate...\n";
     getframes_thread.join();
-    kill(adb_pid, SIGTERM);
+    cout << " - terminating ADB interface...\n";
+    if (0 != kill(adb_pid, SIGTERM))
+        cout << "--- WARNING (run): failed to kill ADB process\n";
     cout << "Bot stopped.\n";
     return m_ret_code;
 }
@@ -342,9 +360,8 @@ int AndroidBot::run()
 void AndroidBot::getframes_process()
 {
     int retcode {0};
-    unique_lock<mutex> data_lock {m_mutex_all, defer_lock};
+    unique_lock<mutex> data_lock {m_mutex_all}; // lock while init then notify
     try { // each thread requires its own exception handling
-        
         // init section
         V4L2DeviceParameters v4l2_params {
             m_v4l2_dev_name.c_str(),
@@ -357,8 +374,8 @@ void AndroidBot::getframes_process()
             cerr << "--- ERROR (getframes): failed to open "
                  << m_v4l2_dev_name << endl;
             m_bot_status = stopped;
-            m_ret_code   = -1;
-            m_run_lock.unlock();
+            data_lock.unlock();
+            m_notify.notify_all();
             return;
         }
         m_v4l2_buf_size = mp_v4l2_device->getBufferSize();
@@ -379,11 +396,13 @@ void AndroidBot::getframes_process()
             2 * chrono::ceil<seconds>(m_check_interval).count(),
             0
         };
-        m_run_lock.unlock();
+        data_lock.unlock();
+        m_notify.notify_all();
 
         // main loop
         while (m_bot_status == running)
         {
+            cout << "(frames) status = " << m_bot_status << endl;
             if (!mp_v4l2_device->isReadable(&timeout)) {
                 cerr << "--- ERROR (getframes): device "
                      << m_v4l2_dev_name << " timeout\n";
@@ -430,6 +449,7 @@ void AndroidBot::program_loop()
         state_itype TERM_STATE  {m_bot_states.find(TERMINATION_STATE)},
                     UNDEF_STATE {m_bot_states.end()};
         while (m_bot_status == running) {
+            cout << "(program) status = " << m_bot_status << endl;
             if (TERM_STATE == mp_state || mp_state == UNDEF_STATE) {
                 if (UNDEF_STATE == mp_state) {
                     cerr << "--- ERROR (program): undefined bot program state.\n";
@@ -471,9 +491,12 @@ void AndroidBot::console_ui()
         );
         // terminate bot
         if ("STOP" == user_cmd) break;
+        // print bot state
+        else if ("STATE" == user_cmd)
+            cout << "Current state: " << state() << endl;
 
         // TEST
-        if ("D" == user_cmd) {
+        else if ("D" == user_cmd) {
             bool success;
             double certainty;
             cv::Point location;

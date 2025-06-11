@@ -7,17 +7,15 @@
 
 #pragma once
 #include "androidbot.hpp"
-#include <chrono>
 
 class EveMinerBot : public AndroidBot {
 public:
-	EveMinerBot() = delete;
-	EveMinerBot(const json &settings);
+	EveMinerBot(const char* config_file);
 	bool new_states() override;
 	void program()    override;
 private:
 	// general parameters
-	chrono::milliseconds m_wait_some {1000};
+	mseconds m_wait_some {1000};
 	// images positions cache
 	cv::Point
 		pnt_undock_btn {0, 0};
@@ -25,4 +23,16 @@ private:
 	state_itype
 		stUNKNOWN {nullptr},
 		stDOCKED  {nullptr};
+};
+
+///////////////////////////////////////////////////////////////
+// inline methods implementation
+
+inline EveMinerBot::EveMinerBot(const char* config_file)
+	: AndroidBot(config_file)
+{
+	// DEF_INITIAL_STATE is allready registered,
+	// but we get its state_itype pointer 
+	stUNKNOWN = get<state_itype>(reg_state(DEF_INITIAL_STATE));
+	m_wait_some = mseconds(2 * check_interval());
 };

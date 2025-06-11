@@ -6,18 +6,7 @@
 */
 
 #include "eveminerbot.hpp"
-#include <chrono>
 #include <thread>
-
-#ifndef NDEBUG
-#include <iostream>
-#endif
-
-EveMinerBot::EveMinerBot(const json &settings) : AndroidBot(settings)
-{
-	stUNKNOWN = get<state_itype>(reg_state(DEF_INITIAL_STATE));
-	m_wait_some = chrono::milliseconds(2 * check_interval());
-};
 
 bool EveMinerBot::new_states()
 {
@@ -32,9 +21,6 @@ bool EveMinerBot::new_states()
 
 void EveMinerBot::program() // one iteration of main cycle
 {
-	#ifndef NDEBUG
-	cout << "EveMinerBot state = " << state() << endl;
-	#endif
 	////////////////////////////////////////////////////////
 	if (stUNKNOWN == state_ptr())
 	{
