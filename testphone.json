@@ -1,6 +1,7 @@
 {
     "adb_name"          : "Redmi8Pro",
     "adb_serial"        : "cilru8inmbjne6ln",
+    "check_reqs"        : true,
     "v4l2_device_num"   : 10,
     "adb_wait_for"      : 3,
     "adb_fps"           : 5,

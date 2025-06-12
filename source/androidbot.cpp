@@ -27,38 +27,6 @@ AndroidBot::AndroidBot(const char* config_file)
 
     m_bot_status = uninitialized;
 
-    // system prerequisites
-    cout << "Checking required tools...\n";
-    ConsoleCmd command;
-    string cmd_list[] {
-        "v4l2loopback-ctl",
-        "v4l2-ctl",
-        "scrcpy",
-        "sudo"
-    };
-    for (string cmd : cmd_list) {
-        command = cmd + " --help";
-        if (!command.available()) {
-            cout << "--- ERROR (AndroidBot): required command " << cmd
-                 << " is not available.\n" << help_text;
-            return;
-        }
-        cout << " - " << cmd << " present\n";
-    }
-    cout << "Validating sudo command...\n";
-    command = "sudo --validate";
-    if (0 != command.execute()) {
-        cerr << "--- ERROR (AndroidBot): failed to validate sudo command.\n";
-        return;
-    }
-    cout << "Checking dkms status......";
-    command = "sudo -n dkms status | grep v4l2loopback";
-    if (!command.has_output()) {
-        cout << "\n - v4l2loopback kernel module not found.\n" << help_text;
-        return;
-    }
-    cout << "ok\n";
-
     // settings from JSON
     json settings;
     try {
@@ -99,6 +67,10 @@ AndroidBot::AndroidBot(const char* config_file)
             return;
         }
         m_scale_factor /= static_cast<double>(image.cols);
+
+        // store reference image to reserve
+        // index 0 in image library for error signal
+        m_lib_images.push_back(image);
     }
     catch (const json::parse_error& e) {
 		cerr << "\n--- ERROR (AndroidBot): failed to parse config file '"
@@ -113,8 +85,11 @@ AndroidBot::AndroidBot(const char* config_file)
     }
     
     // optional JSON settings
+    bool check_reqs {true};
     auto i_eof = settings.end();
-    auto i_key = settings.find("adb_name");
+    auto i_key = settings.find("check_reqs");
+    if (i_key != i_eof) check_reqs = *i_key;
+    i_key = settings.find("adb_name");
     if (i_key != i_eof) m_adb_name = *i_key;
     else                m_adb_name = m_adb_serial;
     i_key = settings.find("adb_fps");
@@ -155,6 +130,46 @@ AndroidBot::AndroidBot(const char* config_file)
     }
     cout << "ok\n";
 
+    // system prerequisites
+    if (check_reqs) {
+
+        cout << "Checking required tools...\n";
+        ConsoleCmd command;
+        string cmd_list[] {
+            "v4l2loopback-ctl",
+            "v4l2-ctl",
+            "scrcpy",
+            "sudo"
+        };
+        for (string cmd : cmd_list) {
+            command = cmd + " --help";
+            if (!command.available()) {
+                cout << "--- ERROR (AndroidBot): required command " << cmd
+                    << " is not available.\n" << help_text;
+                return;
+            }
+            cout << " - " << cmd << " present\n";
+        }
+        cout << "Validating sudo command...\n";
+        #ifdef NDEBUG
+        command = "sudo --validate";
+        #else
+        command = "sudo --validate --askpass";
+        #endif
+        if (0 != command.execute()) {
+            cerr << "--- ERROR (AndroidBot): failed to validate sudo command.\n";
+            return;
+        }
+        cout << "Checking dkms status......";
+        command = "sudo -n dkms status | grep v4l2loopback";
+        if (!command.has_output()) {
+            cout << "\n - v4l2loopback kernel module not found.\n" << help_text;
+            return;
+        }
+        cout << "ok\n";
+
+    } // check_reqs
+
     // V4L2 device setup
     cout << "Preparing V4L2 device.....";
     ConsoleCmd cmd {"sudo -n modprobe v4l2loopback"};
@@ -185,12 +200,6 @@ AndroidBot::AndroidBot(const char* config_file)
     cout << "ok\n";
 
     // bot states init
-    cout << "Initializing bot states...";
-    if (!new_states()) { // ancestor states registration
-        cerr << "\n--- ERROR (AndroidBot): failed to register bot states.\n";
-        return;
-    }
-    cout << "ok\n";
     mp_state = m_bot_states.find(DEF_INITIAL_STATE);
     m_bot_status = initialized;
     cout << "Bot initialized.\n";
@@ -264,7 +273,7 @@ bool AndroidBot::collect_images(const json& filenames, bool force_gs)
             UC_TO_FP_SCALE
         );
         m_lib_images.push_back(image);
-        m_lib_img_map[img_filename] = i;
+        m_lib_img_map[img_filename] = i + 1; // index 0 is reserved for error signal
     }
     return true;
 }
@@ -309,10 +318,11 @@ int AndroidBot::run()
         close(adb_output);
         execlp(
             "scrcpy",
+            "scrcpy",
             "--start-app=com.netease.eve.en",
-            "--no-video-playback",
             "--no-audio",
             #ifdef NDEBUG
+            "--no-video-playback",
             "--no-window",
             "--turn-screen-off",
             #endif
@@ -337,6 +347,11 @@ int AndroidBot::run()
     m_notify.wait(wait_lock);
     wait_lock.unlock();
     if (m_bot_status != running) return -1;
+    cout << " - initializing bot states...\n";
+    if (!new_states()) { // ancestor states registration
+        cerr << "\n--- ERROR (run): failed to register bot states.\n";
+        return -1;
+    }
     cout << " - starting bot program loop\n";
     thread program_thread(&AndroidBot::program_loop, this);
 
@@ -345,7 +360,6 @@ int AndroidBot::run()
     cout << "Terminating bot...\n";
 
     // normal termination
-    cout << "(run) status = " << m_bot_status << endl;
     cout << " - waiting for program to terminate...\n";
     program_thread  .join();
     cout << " - waiting for V4l2 capture to terminate...\n";
@@ -443,13 +457,12 @@ void AndroidBot::getframes_process()
 
 void AndroidBot::program_loop()
 {
+    cout << "progrma loop started\n";
     int retcode {0};
-    unique_lock<mutex> data_lock {m_mutex_all, defer_lock};
     try { // each thread requires its own exception handling
         state_itype TERM_STATE  {m_bot_states.find(TERMINATION_STATE)},
                     UNDEF_STATE {m_bot_states.end()};
         while (m_bot_status == running) {
-            cout << "(program) status = " << m_bot_status << endl;
             if (TERM_STATE == mp_state || mp_state == UNDEF_STATE) {
                 if (UNDEF_STATE == mp_state) {
                     cerr << "--- ERROR (program): undefined bot program state.\n";
@@ -469,10 +482,9 @@ void AndroidBot::program_loop()
 		cerr << "--- ERROR (program): unknown excepition type.\n";
         retcode = -1;
 	}
-    data_lock.lock();
+    lock_guard<mutex> data_lock {m_mutex_all};
     m_bot_status = stopped;
     m_ret_code  |= retcode;
-    data_lock.unlock();
 }
 
 void AndroidBot::console_ui()
@@ -518,9 +530,8 @@ void AndroidBot::console_ui()
         else
             cout << "Unknown command: " << user_cmd << endl;
     }
-    unique_lock<mutex> data_lock {m_mutex_all};
+    lock_guard<mutex> data_lock {m_mutex_all};
     m_bot_status = stopped;
-    data_lock.unlock();
 }
 
 void AndroidBot::process_frame()
@@ -630,6 +641,6 @@ int AndroidBot::detect_image(
                 v : match_result.rows - 1) - erase_area.y + 1;
             match_result(erase_area) = 0.0; // 1.0 if TM_SQDIFF_NORMED
         }
-    }
+    } // for (maxLocations)
     return det_count;
 }

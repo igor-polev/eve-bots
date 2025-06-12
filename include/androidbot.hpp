@@ -12,6 +12,7 @@
 #include <set>
 #include <map>
 #include <chrono>
+#include <stdexcept>
 #include <mutex>
 #include <condition_variable>
 #include <nlohmann/json.hpp>
@@ -50,7 +51,8 @@ protected:
 	typedef set<string>::iterator      state_itype;
 	typedef pair<state_itype, bool>    streg_type;
 
-	// image detection
+	// image operations
+	idx_type image_idx(const string& image_name) const;
 	int detect_image(
 		const string& image_name,
 		cv::Point *pLocation    = nullptr,
@@ -66,10 +68,11 @@ protected:
 	mseconds check_interval() const noexcept;
 
 	// bot state manipulation
-	const string& state()     const noexcept;
-	state_itype   state_ptr() const noexcept;
-	state_itype   has_state(const string& new_state) const;
-	state_itype   has_state(const char*   new_state) const;
+	const set<string>& all_states() const noexcept;
+	const string&      state()      const noexcept;
+	state_itype        state_ptr()  const noexcept;
+	state_itype   has_state(const string& state) const;
+	state_itype   has_state(const char*   state) const;
 	streg_type    reg_state(const string& new_state);
 	streg_type    reg_state(const char*   new_state);
 	bool set_state(const string& new_state);
@@ -77,8 +80,8 @@ protected:
 	void set_state(state_itype   new_state_ptr) noexcept; // unsafe pointer operation
 
 	// ancestor interface - must be implemented in child class
-	virtual bool new_states() {return true;} // register new states
-	virtual void program()    {}             // define bot program
+	virtual bool new_states() = 0; // register new states
+	virtual void program()    = 0; // define bot program
 	
 	// multi-threading
 	mutex              m_mutex_all;
@@ -136,18 +139,35 @@ inline AndroidBot::statuses AndroidBot::status() const noexcept
 	return m_bot_status;
 };
 
+inline AndroidBot::idx_type AndroidBot::image_idx(const string& image_name) const
+{
+	auto idx = m_lib_img_map.find(image_name);
+	return
+		idx != m_lib_img_map.end()
+		? idx->second
+		: static_cast<idx_type>(0);
+}
+
 inline int AndroidBot::detect_image(
 	const string& image_name,
 	cv::Point *pLocation,
 	double    *pCertainty,
 	int        maxLocations)
 {
+	auto idx = image_idx(image_name);
+	if (!idx) 
+		throw out_of_range(image_name + " does not exist in image library");
 	return detect_image(
-		m_lib_img_map[image_name],
+		idx,
 		pLocation,
 		pCertainty,
 		maxLocations
 	);
+}
+
+inline const set<string>& AndroidBot::all_states() const noexcept
+{
+	return m_bot_states;
 }
 
 inline const string& AndroidBot::state() const noexcept
@@ -159,17 +179,17 @@ inline AndroidBot::state_itype AndroidBot::state_ptr() const noexcept
 	return mp_state;
 }
 
-inline AndroidBot::state_itype AndroidBot::has_state(const char* new_state) const
+inline AndroidBot::state_itype AndroidBot::has_state(const char* state) const
 {
-	state_itype it = m_bot_states.find(new_state);
+	state_itype it = m_bot_states.find(state);
 	if (it == m_bot_states.end())
 		return static_cast<state_itype>(nullptr);
 	else
 		return it;
 }
-inline AndroidBot::state_itype AndroidBot::has_state(const string& new_state) const
+inline AndroidBot::state_itype AndroidBot::has_state(const string& state) const
 {
-	return has_state(new_state.c_str());
+	return has_state(state.c_str());
 }
 
 inline AndroidBot::streg_type AndroidBot::reg_state(const char* new_state)
