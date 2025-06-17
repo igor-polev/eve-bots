@@ -15,7 +15,7 @@ public:
 	void program()    override;
 private:
 	// specific parameters
-	mseconds m_wait_some;
+	millis m_wait_some;
 	// image library cache
 	idx_type
 		im_UNDOCK_BTN;

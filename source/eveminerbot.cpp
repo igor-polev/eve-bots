@@ -5,18 +5,18 @@
 	EveMinerBot class implementation.
 */
 
-#include "eveminerbot.hpp"
-//#include <fcntl.h>
 #include <stdexcept>
 #include <thread>
 
-#include <iostream> // DEBUG
+#include "eveminerbot.hpp"
+
+//#include <iostream> // DEBUG
 
 EveMinerBot::EveMinerBot(const char* config_file)
 	: AndroidBot(config_file)
 {
 	// image cache
-	idx_type im_success {static_cast<idx_type>(1)};
+	idx_type im_success {1};
 
 	im_UNDOCK_BTN = image_idx("eve_undock_btn.png");
 	im_success &= im_UNDOCK_BTN;
@@ -28,7 +28,7 @@ EveMinerBot::EveMinerBot(const char* config_file)
 	st_UNKNOWN = has_state(DEF_INITIAL_STATE);
 
 	// specific parameters
-	m_wait_some = mseconds(2 * check_interval());
+	m_wait_some = check_interval() * 2;
 }
 
 bool EveMinerBot::new_states()
@@ -45,14 +45,12 @@ bool EveMinerBot::new_states()
 
 void EveMinerBot::program() // one iteration of main cycle
 {
-	cout << "EB program state: " << state() << endl; // DEBUG
 	////////////////////////////////////////////////////////
 	if (st_UNKNOWN == state_ptr())
 	{
 		// wait for "docked" signature
-		if (detect_image(im_UNDOCK_BTN, &pnt_UNDOCK_BTN)) {
+		if (detect_image(im_UNDOCK_BTN, &pnt_UNDOCK_BTN))
 			set_state(st_DOCKED);
-		}
 		else
 			this_thread::sleep_for(m_wait_some);
 	}

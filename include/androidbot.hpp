@@ -24,7 +24,7 @@
 using namespace std;
 using json     = nlohmann::json;
 using seconds  = chrono::seconds;
-using mseconds = chrono::milliseconds;
+using millis = chrono::milliseconds;
 
 class AndroidBot {
 public:
@@ -65,7 +65,7 @@ protected:
 		int        maxLocations = 1);
 	
 	// member access
-	mseconds check_interval() const noexcept;
+	millis check_interval() const noexcept;
 
 	// bot state manipulation
 	const set<string>& all_states() const noexcept;
@@ -110,7 +110,7 @@ private:
 	double       m_scale_factor;    // scaling factor form search images to stream resolution
 	double       m_threshold;       // detection threshold 
 	int          m_adb_fps;         // user-defined FPS of video stream
-	mseconds     m_check_interval;  // bot screen check interval in milliseconds
+	millis       m_check_interval;  // bot screen check interval in milliseconds
 	seconds      m_adb_wait_for;    // time to wait for ADB to init in seconds
 	bool         m_dump_frames;     // dump each frame to file
 	bool         m_force_greyscale; // force image detection in greayscale mode
@@ -142,10 +142,7 @@ inline AndroidBot::statuses AndroidBot::status() const noexcept
 inline AndroidBot::idx_type AndroidBot::image_idx(const string& image_name) const
 {
 	auto idx = m_lib_img_map.find(image_name);
-	return
-		idx != m_lib_img_map.end()
-		? idx->second
-		: static_cast<idx_type>(0);
+	return idx != m_lib_img_map.end() ? idx->second : 0;
 }
 
 inline int AndroidBot::detect_image(
@@ -223,7 +220,7 @@ inline bool AndroidBot::set_state(const string& new_state)
 	return set_state(new_state.c_str());
 }
 
-inline mseconds AndroidBot::check_interval() const noexcept
+inline millis AndroidBot::check_interval() const noexcept
 {
 	return m_check_interval;
 }

@@ -16,7 +16,6 @@ Requirements:
     dkms package;
     v4l2loopback-dkms kernel module;
     v4l2loopback-utils package;
-	v4l-utils package;
     scrcpy utility;
 	sudo command.
     See https://github.com/Genymobile/scrcpy for more details.

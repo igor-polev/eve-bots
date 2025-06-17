@@ -48,7 +48,7 @@ AndroidBot::AndroidBot(const char* config_file)
         m_img_lib_dir       = settings.at("img_lib_dir");
         string res_ref_img  = settings.at("res_reference_img"),
                lib_ref_img  = settings.at("lib_reference_img");
-        m_check_interval = seconds(settings.at("check_interval"));
+        m_check_interval = millis(settings.at("check_interval"));
         m_v4l2_dev_name = "/dev/video" + to_string(m_v4l2_dev_num);
 
         // scale factor calculation
@@ -67,10 +67,6 @@ AndroidBot::AndroidBot(const char* config_file)
             return;
         }
         m_scale_factor /= static_cast<double>(image.cols);
-
-        // store reference image to reserve
-        // index 0 in image library for error signal
-        m_lib_images.push_back(image);
     }
     catch (const json::parse_error& e) {
 		cerr << "\n--- ERROR (AndroidBot): failed to parse config file '"
@@ -85,10 +81,10 @@ AndroidBot::AndroidBot(const char* config_file)
     }
     
     // optional JSON settings
-    bool check_reqs {true};
+    bool check_system {true};
     auto i_eof = settings.end();
-    auto i_key = settings.find("check_reqs");
-    if (i_key != i_eof) check_reqs = *i_key;
+    auto i_key = settings.find("check_system");
+    if (i_key != i_eof) check_system = *i_key;
     i_key = settings.find("adb_name");
     if (i_key != i_eof) m_adb_name = *i_key;
     else                m_adb_name = m_adb_serial;
@@ -113,31 +109,21 @@ AndroidBot::AndroidBot(const char* config_file)
     cout << "Loading images library....";
     bool img_collected {false};
     i_key = settings.find("lib_images");
-    if (i_key != i_eof) {
-        auto img_count = i_key->size();
-        if (img_count > 0) {
-            m_lib_images.reserve(img_count);
-            m_lib_masks .reserve(img_count);
-            img_collected = collect_images(
-                *i_key,
-                m_force_greyscale
-            );
-        }
-    }
+    if (i_key != i_eof)
+        img_collected = collect_images(*i_key, m_force_greyscale);
     if (!img_collected) {
         cerr << "\n--- ERROR (AndroidBot): faild to read image library.\n";
         return;
     }
     cout << "ok\n";
 
-    // system prerequisites
-    if (check_reqs) {
+    if (check_system) {
 
+        // system prerequisites
         cout << "Checking required tools...\n";
         ConsoleCmd command;
         string cmd_list[] {
             "v4l2loopback-ctl",
-            "v4l2-ctl",
             "scrcpy",
             "sudo"
         };
@@ -168,36 +154,31 @@ AndroidBot::AndroidBot(const char* config_file)
         }
         cout << "ok\n";
 
-    } // check_reqs
+        // V4L2 device setup
+        cout << "Preparing V4L2 device.....";
+        ConsoleCmd cmd {"sudo -n modprobe v4l2loopback"};
+        if (0 != cmd.execute()) {
+            cerr << "\n--- ERROR (AndroidBot): failed to init v4l2loopback kernel module\n";
+            return;
+        }
+        cmd = string("sudo -n v4l2loopback-ctl delete ")
+            + to_string(m_v4l2_dev_num)
+            + " &> /dev/null";
+        cmd.execute();
+        cmd = string("sudo -n v4l2loopback-ctl add ")
+            + to_string(m_v4l2_dev_num)
+            + " --name " + m_adb_name
+            + " &> /dev/null";
+        if (0 != cmd.execute()) {
+            cerr << "\n--- ERROR (AndroidBot): failed to add V4L2 device "
+                << m_v4l2_dev_name << endl;
+            return;
+        }
+        cout << "ok\n";
 
-    // V4L2 device setup
-    cout << "Preparing V4L2 device.....";
-    ConsoleCmd cmd {"sudo -n modprobe v4l2loopback"};
-    if (0 != cmd.execute()) {
-        cerr << "\n--- ERROR (AndroidBot): failed to init v4l2loopback kernel module\n";
-        return;
-    }
-    cmd = string("sudo -n v4l2loopback-ctl delete ")
-        + to_string(m_v4l2_dev_num)
-        + " &> /dev/null";
-    cmd.execute();
-    cmd = string("sudo -n v4l2loopback-ctl add ")
-        + to_string(m_v4l2_dev_num)
-        + " --name " + m_adb_name
-        + " &> /dev/null";
-    if (0 != cmd.execute()) {
-        cerr << "\n--- ERROR (AndroidBot): failed to add V4L2 device "
-             << m_v4l2_dev_name << endl;
-        return;
-    }
-    cmd = string("sudo v4l2-ctl --set-ctrl sustain_framerate=1")
-        + " --device " + m_v4l2_dev_name;
-    if (0 != cmd.execute()) {
-        cerr << "\n--- ERROR (AndroidBot): failed to set attribute of V4L2 device "
-             << m_v4l2_dev_name << endl;
-        return;
-    }
-    cout << "ok\n";
+    } // check_system
+    else
+        cout << "System check skipped.\n";
 
     // bot states init
     mp_state = m_bot_states.find(DEF_INITIAL_STATE);
@@ -220,9 +201,19 @@ bool AndroidBot::collect_images(const json& filenames, bool force_gs)
     string img_filename;
     Mat image, image_scaled;
     auto img_count = filenames.size();
-    for (idx_type i = 0; i < img_count; i++)
+
+    if (img_count < 1) return false;
+
+    // index 0 in image library is reserved for error signal
+    img_count++;
+    m_lib_images.reserve(img_count);
+    m_lib_masks .reserve(img_count);
+    m_lib_images.push_back(image);
+    m_lib_masks .push_back(image);
+
+    for (idx_type i = 1; i < img_count; i++)
     {
-        img_filename = filenames[i];
+        img_filename = filenames[i - 1];
         image = imread(
             m_img_lib_dir + img_filename,
             IMREAD_UNCHANGED
@@ -273,7 +264,7 @@ bool AndroidBot::collect_images(const json& filenames, bool force_gs)
             UC_TO_FP_SCALE
         );
         m_lib_images.push_back(image);
-        m_lib_img_map[img_filename] = i + 1; // index 0 is reserved for error signal
+        m_lib_img_map[img_filename] = i;
     }
     return true;
 }
@@ -416,7 +407,6 @@ void AndroidBot::getframes_process()
         // main loop
         while (m_bot_status == running)
         {
-            cout << "(frames) status = " << m_bot_status << endl;
             if (!mp_v4l2_device->isReadable(&timeout)) {
                 cerr << "--- ERROR (getframes): device "
                      << m_v4l2_dev_name << " timeout\n";
@@ -457,7 +447,6 @@ void AndroidBot::getframes_process()
 
 void AndroidBot::program_loop()
 {
-    cout << "progrma loop started\n";
     int retcode {0};
     try { // each thread requires its own exception handling
         state_itype TERM_STATE  {m_bot_states.find(TERMINATION_STATE)},
@@ -503,24 +492,43 @@ void AndroidBot::console_ui()
         );
         // terminate bot
         if ("STOP" == user_cmd) break;
+
         // print bot state
         else if ("STATE" == user_cmd)
             cout << "Current state: " << state() << endl;
 
+        // switch dump mode
+        else if ("DUMP" == user_cmd) {
+            lock_guard<mutex> data_lock {m_mutex_all};
+            if (m_dump_frames) {
+                m_dump_frames = false;
+                cout << "Frames dump disabled.\n";
+            } else {
+                m_dump_frames = true;
+                cout << "Frames dump enabled.\n";
+            }
+        }
+
         // TEST
         else if ("D" == user_cmd) {
-            bool success;
+            int found;
             double certainty;
             cv::Point location;
             cv::TickMeter tickMeter;
             cout << "Image detection... ";
             tickMeter.start();
-            success = detect_image(0, &location, &certainty);
+            found = detect_image(
+                "eve_undock_btn.png",
+                &location,
+                &certainty
+            );
             tickMeter.stop();
-            if (success) {
-                cout << "succedded (" << tickMeter.getTimeSec() << "s)\n"
-                     << "certainty: " << certainty << endl
-                     << "location:  " << location << endl;
+            if (found) {
+                cout << "succedded!\n"
+                     << "imgs found: " << found << endl
+                     << "certainty:  " << certainty << endl
+                     << "location:   " << location << endl
+                     << "time spent: " << tickMeter.getTimeSec() << "s\n";
             } else {
                 cout << "failed (" << tickMeter.getTimeSec() << "s)\n";
             }
@@ -561,8 +569,8 @@ void AndroidBot::process_frame()
     );
     if (!m_dump_frames) return;
     if (!cv::imwrite(m_adb_serial + ".png", *mp_frame_rgb))
-        cerr << "--- ERROR (process_frame): failed to save frame\n";
-}
+        cerr << "--- ERROR (process_frame): failed to dump frame\n";
+   }
 
 int AndroidBot::detect_image(
     idx_type   idx,
@@ -571,12 +579,19 @@ int AndroidBot::detect_image(
     int        maxLocations)
 {
     using namespace cv;
+    if (idx < 1 || idx >= m_lib_images.size()) {
+        cerr << "--- ERROR (detect_image): invalid image index\n";
+        return 0;
+    }
+    Mat *p_image = &m_lib_images[idx],
+        *p_mask  = &m_lib_masks [idx];
+
     // this function does not change object data
     // but we lock while copying frame into local variable
     // to prevent image distortion from getframes thread
     Mat frame;
     unique_lock<mutex> data_lock {m_mutex_all};
-    if (!m_force_greyscale && 1 == m_lib_images[idx].channels())
+    if (!m_force_greyscale && 1 == p_image->channels())
         cvtColor(
             *mp_frame_fp,
             frame,
@@ -586,30 +601,55 @@ int AndroidBot::detect_image(
         frame = mp_frame_fp->clone();
     data_lock.unlock();
 
+    // dump images
+    static const char* dump_err = "--- ERROR (detect_image): failed to dump images\n";
+    short channels;
+    double fp_to_uc_scale;
+    Mat dump_img;
+    if (m_dump_frames) {
+        channels = m_force_greyscale ? 1 : 3;
+        fp_to_uc_scale = 1.0 / UC_TO_FP_SCALE;
+
+        frame.convertTo(dump_img, CV_8UC(channels), fp_to_uc_scale);
+        if (!imwrite(m_adb_serial + "_det_frame.png", dump_img))
+            cerr << dump_err;
+        p_image->convertTo(dump_img, CV_8UC(channels), fp_to_uc_scale);
+        if (!imwrite(m_adb_serial + "_det_image.png", dump_img))
+            cerr << dump_err;
+        if (!p_mask->empty()) {
+            p_mask->convertTo(dump_img, CV_8UC1, fp_to_uc_scale);
+            if (!imwrite(m_adb_serial + "_det_mask.png", dump_img))
+                cerr << dump_err;
+        }
+    }
+
     Mat match_result;
     matchTemplate(
         frame,
-        m_lib_images[idx],
+        *p_image,
         match_result,
-        TM_CCORR_NORMED, // if changed to TM_SQDIFF_NORMED methods,
-                                // don't forget to change code below 
-        m_lib_masks[idx].empty() ? noArray() : m_lib_masks[idx]
+        TM_CCOEFF_NORMED, // if changed to TM_SQDIFF_NORMED methods,
+                                 // don't forget to change code below 
+        p_mask->empty() ? noArray() : *p_mask
     );
 
+    // dump result
+    if (m_dump_frames) {
+        match_result.convertTo(dump_img, CV_8UC1, fp_to_uc_scale);
+        if (!imwrite(m_adb_serial + "_det_result.png", dump_img))
+            cerr << dump_err;
+    }
+
     // select best matches
-    Point  match_location;
     double match_certainty;
-    Point image_center {
-        m_lib_images[idx].cols / 2,
-        m_lib_images[idx].rows / 2
-    };
+    Point  match_location,
+           image_center {p_image->cols / 2, p_image->rows / 2};
     Rect erase_area;
-    int x_offset = m_lib_images[idx].cols / 3,
-        y_offset = m_lib_images[idx].rows / 3,
+    int x_offset = p_image->cols / 3,
+        y_offset = p_image->rows / 3,
         v, // temporary calcuations storage
-        det_count {0},
-        steps {maxLocations - 1};
-    for (int i = 0; i <= steps; i++) {
+        det_count {0};
+    for (int i = 0, steps = maxLocations - 1; i <= steps; i++) {
         minMaxLoc(  // change args order if TM_SQDIFF_NORMED
             match_result,
             nullptr,
@@ -633,10 +673,10 @@ int AndroidBot::detect_image(
             erase_area.x = v < 0 ? 0 : v;
             v = match_location.y - y_offset;
             erase_area.y = v < 0 ? 0 : v;
-            v = match_location.x + m_lib_images[idx].cols + x_offset;
+            v = match_location.x + p_image->cols + x_offset;
             erase_area.width = (v < match_result.cols ?
                 v : match_result.cols - 1) - erase_area.x + 1;
-            v = match_location.y + m_lib_images[idx].rows + y_offset;
+            v = match_location.y + p_image->rows + y_offset;
             erase_area.height = (v < match_result.rows ?
                 v : match_result.rows - 1) - erase_area.y + 1;
             match_result(erase_area) = 0.0; // 1.0 if TM_SQDIFF_NORMED
