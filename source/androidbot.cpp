@@ -7,8 +7,6 @@
 
 #include <iostream>
 #include <fstream>
-#include <mutex>
-#include <string>
 #include <thread>
 #include <csignal>
 #include <unistd.h>
@@ -380,7 +378,7 @@ void AndroidBot::getframes_process()
                  << m_v4l2_dev_name << endl;
             m_bot_status = stopped;
             data_lock.unlock();
-            m_notify.notify_all();
+            m_notify.notify_one();
             return;
         }
         m_v4l2_buf_size = mp_v4l2_device->getBufferSize();
@@ -402,7 +400,7 @@ void AndroidBot::getframes_process()
             0
         };
         data_lock.unlock();
-        m_notify.notify_all();
+        m_notify.notify_one();
 
         // main loop
         while (m_bot_status == running)
@@ -574,25 +572,26 @@ void AndroidBot::process_frame()
 
 int AndroidBot::detect_image(
     idx_type   idx,
-    cv::Point *pLocation,
-    double    *pCertainty,
-    int        maxLocations,
-	condition_variable *pNotify)
+    cv::Point *p_location,
+    double    *p_certainty,
+    int        max_locs,
+	condition_variable *p_notify)
 {
     using namespace cv;
-    if (idx < 1 || idx >= m_lib_images.size()) {
-        cerr << "--- ERROR (detect_image): invalid image index\n";
-        return 0;
-    }
-    Mat *p_image = &m_lib_images[idx],
-        *p_mask  = &m_lib_masks [idx];
-
     // this function does not change object data
     // but we lock while copying frame into local variable
     // to prevent image distortion from getframes thread
-    Mat frame;
-    unique_lock<mutex> data_lock {m_mutex_all},
-                       det_lock  {m_mutex_detect, defer_lock};
+    unique_lock<mutex> det_lock  {m_mutex_detect, defer_lock},
+                       data_lock {m_mutex_all};
+    if (idx < 1 || idx >= m_lib_images.size()) {
+        data_lock.unlock();
+        cerr << "--- ERROR (detect_image): invalid image index\n";
+        if (p_notify) p_notify->notify_one();
+        return 0;
+    }
+    Mat *p_image = &m_lib_images[idx],
+        *p_mask  = &m_lib_masks [idx],
+        frame;
     if (!m_force_greyscale && 1 == p_image->channels())
         cvtColor(
             *mp_frame_fp,
@@ -601,27 +600,33 @@ int AndroidBot::detect_image(
         );
     else
         frame = mp_frame_fp->clone();
+    // coping data from non-local object fields
+    // in case parent thread is detached
+    double  threshold       {m_threshold};
+    bool    dump_frames     {m_dump_frames};
+    bool    force_greyscale {m_force_greyscale};
+    string& adb_serial      {m_adb_serial};
     data_lock.unlock();
 
     // dump images
     static const char* dump_err = "--- ERROR (detect_image): failed to dump images\n";
-    short channels;
     double fp_to_uc_scale;
+    short  dump_channels;
     Mat dump_img;
-    if (m_dump_frames) {
-        channels = m_force_greyscale ? 1 : 3;
+    if (dump_frames) {
+        dump_channels = force_greyscale ? 1 : 3;
         fp_to_uc_scale = 1.0 / UC_TO_FP_SCALE;
 
-        if (pNotify) det_lock.lock();
-        frame.convertTo(dump_img, CV_8UC(channels), fp_to_uc_scale);
-        if (!imwrite(m_adb_serial + "_det_frame.png", dump_img))
+        if (p_notify) det_lock.lock();
+        frame.convertTo(dump_img, CV_8UC(dump_channels), fp_to_uc_scale);
+        if (!imwrite(adb_serial + "_det_frame.png", dump_img))
             cerr << dump_err;
-        p_image->convertTo(dump_img, CV_8UC(channels), fp_to_uc_scale);
-        if (!imwrite(m_adb_serial + "_det_image.png", dump_img))
+        p_image->convertTo(dump_img, CV_8UC(dump_channels), fp_to_uc_scale);
+        if (!imwrite(adb_serial + "_det_image.png", dump_img))
             cerr << dump_err;
         if (!p_mask->empty()) {
             p_mask->convertTo(dump_img, CV_8UC1, fp_to_uc_scale);
-            if (!imwrite(m_adb_serial + "_det_mask.png", dump_img))
+            if (!imwrite(adb_serial + "_det_mask.png", dump_img))
                 cerr << dump_err;
         }
         if (det_lock.owns_lock()) det_lock.unlock();
@@ -638,10 +643,10 @@ int AndroidBot::detect_image(
     );
 
     // dump result
-    if (m_dump_frames) {
+    if (dump_frames) {
         match_result.convertTo(dump_img, CV_8UC1, fp_to_uc_scale);
-        if (pNotify) det_lock.lock();
-        if (!imwrite(m_adb_serial + "_det_result.png", dump_img))
+        if (p_notify) det_lock.lock();
+        if (!imwrite(adb_serial + "_det_result.png", dump_img))
             cerr << dump_err;
         if (det_lock.owns_lock()) det_lock.unlock();
     }
@@ -655,7 +660,7 @@ int AndroidBot::detect_image(
         y_offset = p_image->rows / 3,
         v, // temporary calcuations storage
         det_count {0};
-    for (int i = 0, steps = maxLocations - 1; i <= steps; i++) {
+    for (int i = 0, steps = max_locs - 1; i <= steps; i++) {
         minMaxLoc(  // change args order if TM_SQDIFF_NORMED
             match_result,
             nullptr,
@@ -665,20 +670,18 @@ int AndroidBot::detect_image(
         );
         // "inverse" match_certainty if TM_SQDIFF_NORMED:
         // match_certainty = 1.0 - match_certainty;
-        if (match_certainty < m_threshold)
+        if (match_certainty < threshold)
             break;
 
         // save result
         det_count++;
-        if (pNotify) det_lock.lock();
-        if (pLocation) {
-            pLocation[i] = match_location + image_center;
-        };
-        if (pCertainty)
-            pCertainty[i] = match_certainty;
-        if (pNotify) {
+        if (p_notify)
+            det_lock.lock();
+        if (p_location)  p_location [i] = match_location + image_center;
+        if (p_certainty) p_certainty[i] = match_certainty;
+        if (p_notify) {
             det_lock.unlock();
-            pNotify->notify_all();
+            p_notify->notify_one();
         }
 
         // erase current match area - not required at last iteration
@@ -696,18 +699,39 @@ int AndroidBot::detect_image(
             match_result(erase_area) = 0.0; // 1.0 if TM_SQDIFF_NORMED
         }
     } // for (maxLocations)
+    if (p_notify && !det_count) p_notify->notify_one();
     return det_count;
 }
 
-bool AndroidBot::detect_image_any(
-    initializer_list<idx_type> idx_list,
-    cv::Point *pLocation,
-    double    *pCertainty)
+int AndroidBot::detect_image(
+	initializer_list<idx_type> &idx_list,
+	cv::Point *pLocation,
+	double    *pCertainty)
 {
-    auto img_cnt = idx_list.size();
+	cv::Point location;
+	double    found {0.0};
+	unique_lock<mutex> det_lock(m_mutex_detect);
+	thread det_thread([&]() {
+		detect_image_any(idx_list, location, found);
+	});
+	m_notify.wait(det_lock);
+	det_lock.unlock();
+	det_thread.detach();
+	if (!found)     return 0;
+    if (pLocation)  *pLocation = location;
+    if (pCertainty) *pCertainty = found;
+	return 1;
+}
 
-    cv::Point location;
-    double    certainty;
+void AndroidBot::detect_image_any(
+    initializer_list<idx_type> &idx_list,
+    cv::Point &location,
+    double    &certainty)
+{
+    cv::Point th_location;
+    double    th_certainty {0.0};
+    bool      found        {false};
+    auto img_cnt = idx_list.size();
     thread  **p_threads = new thread*[img_cnt];
     condition_variable det_notify;
     unique_lock<mutex> det_lock {m_mutex_detect};
@@ -717,24 +741,30 @@ bool AndroidBot::detect_image_any(
         p_threads[i] = new thread([&]() {
             detect_image(
                 *idx,
-                &location,
-                &certainty,
+                &th_location,
+                &th_certainty,
                 1,
                 &det_notify);
         });
-
-    det_notify.wait(det_lock);
-    if (pLocation)  *pLocation  = location;
-    if (pCertainty) *pCertainty = certainty;
+    for (auto w = img_cnt; w; w--) {
+        det_notify.wait(det_lock);
+        if (!found && th_certainty) {
+            found     = true;
+            location  = th_location;
+            certainty = th_certainty;
+            // thread will be detached after notifying:
+            // don't use non-local variables any further
+            det_lock.unlock();
+            m_notify.notify_one();
+            det_lock.lock();
+        }
+    }
     det_lock.unlock();
-    //return true;
     
-    // cleanup
     for (auto i = 0; i < img_cnt; i++) {
         p_threads[i]->join();
         delete p_threads[i];
     }
     delete[] p_threads;
-
+    if (!found) m_notify.notify_one();
 }
-    

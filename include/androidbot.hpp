@@ -56,20 +56,20 @@ protected:
 	idx_type image_idx(const string& image_name) const;
 	int detect_image(
 		const string& image_name,
-		cv::Point *pLocation    = nullptr,
-		double    *pCertainty   = nullptr,
-		int        maxLocations = 1,
-		condition_variable *pNotify = nullptr);
+		cv::Point *p_location  = nullptr,
+		double    *p_certainty = nullptr,
+		int        max_locs    = 1,
+		condition_variable *p_notify = nullptr);
 	int detect_image(
 		idx_type   idx,
-		cv::Point *pLocation    = nullptr,
-		double    *pCertainty   = nullptr,
-		int        maxLocations = 1,
-		condition_variable *pNotify = nullptr);
-	bool detect_image_any(
-		initializer_list<idx_type>  idx_list,
-		cv::Point   *pLocation    = nullptr,
-		double      *pCertainty   = nullptr);
+		cv::Point *p_location  = nullptr,
+		double    *p_certainty = nullptr,
+		int        max_locs    = 1,
+		condition_variable *p_notify = nullptr);
+	int detect_image(
+		initializer_list<idx_type> &idx_list,
+		cv::Point *p_location  = nullptr,
+		double    *p_certainty = nullptr);
 		
 	// member access
 	millis check_interval() const noexcept;
@@ -78,10 +78,10 @@ protected:
 	const set<string>& all_states() const noexcept;
 	const string&      state()      const noexcept;
 	state_itype        state_ptr()  const noexcept;
-	state_itype   has_state(const string& state) const;
-	state_itype   has_state(const char*   state) const;
-	streg_type    reg_state(const string& new_state);
-	streg_type    reg_state(const char*   new_state);
+	state_itype has_state(const string& state) const;
+	state_itype has_state(const char*   state) const;
+	streg_type  reg_state(const string& new_state);
+	streg_type  reg_state(const char*   new_state);
 	bool set_state(const string& new_state);
 	bool set_state(const char*   new_state);
 	void set_state(state_itype   new_state_ptr) noexcept; // unsafe pointer operation
@@ -137,6 +137,10 @@ private:
 		const json& filenames,
 		bool force_gs
 	);
+	void detect_image_any(
+		initializer_list<idx_type> &idx_list,
+		cv::Point &location,
+		double    &certainty);
 };
 
 ///////////////////////////////////////////////////////////////
@@ -155,21 +159,15 @@ inline AndroidBot::idx_type AndroidBot::image_idx(const string& image_name) cons
 
 inline int AndroidBot::detect_image(
 	const string& image_name,
-	cv::Point *pLocation,
-	double    *pCertainty,
-	int        maxLocations,
-	condition_variable *pNotify)
+	cv::Point *p_location,
+	double    *p_certainty,
+	int        max_locs,
+	condition_variable *p_notify)
 {
 	auto idx = image_idx(image_name);
 	if (!idx) 
 		throw out_of_range(image_name + " does not exist in image library");
-	return detect_image(
-		idx,
-		pLocation,
-		pCertainty,
-		maxLocations,
-		pNotify
-	);
+	return detect_image(idx, p_location, p_certainty, max_locs, p_notify);
 }
 
 inline const set<string>& AndroidBot::all_states() const noexcept
