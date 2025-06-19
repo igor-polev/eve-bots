@@ -7,6 +7,7 @@
 
 #pragma once
 #include <cstddef>
+#include <initializer_list>
 #include <string>
 #include <vector>
 #include <set>
@@ -42,11 +43,11 @@ public:
 protected:
 	// constants & types
 	constexpr static const int     V4L2_FPS_DEFAULT  {30};
-    constexpr static const double  UC_TO_FP_SCALE    {1.0 / 255.0};
-    constexpr static const double  DEF_THRESHOLD     {0.8};
+    constexpr static const double  UC_TO_FP_SCALE    {1.0 / 255.0},
+                                   DEF_THRESHOLD     {0.8};
 	constexpr static const seconds ADB_WAIT_DEFAULT  {5};
-	constexpr static const char*   DEF_INITIAL_STATE {"UNKNOWN"};
-	constexpr static const char*   TERMINATION_STATE {"TERMINATION"};
+	constexpr static const char   *DEF_INITIAL_STATE {"UNKNOWN"},
+	                              *TERMINATION_STATE {"TERMINATION"};
 	typedef vector<cv::Mat>::size_type idx_type;
 	typedef set<string>::iterator      state_itype;
 	typedef pair<state_itype, bool>    streg_type;
@@ -57,13 +58,19 @@ protected:
 		const string& image_name,
 		cv::Point *pLocation    = nullptr,
 		double    *pCertainty   = nullptr,
-		int        maxLocations = 1);
+		int        maxLocations = 1,
+		condition_variable *pNotify = nullptr);
 	int detect_image(
 		idx_type   idx,
 		cv::Point *pLocation    = nullptr,
 		double    *pCertainty   = nullptr,
-		int        maxLocations = 1);
-	
+		int        maxLocations = 1,
+		condition_variable *pNotify = nullptr);
+	bool detect_image_any(
+		initializer_list<idx_type>  idx_list,
+		cv::Point   *pLocation    = nullptr,
+		double      *pCertainty   = nullptr);
+		
 	// member access
 	millis check_interval() const noexcept;
 
@@ -84,36 +91,37 @@ protected:
 	virtual void program()    = 0; // define bot program
 	
 	// multi-threading
-	mutex              m_mutex_all;
+	mutex m_mutex_all,
+		  m_mutex_detect;
 	condition_variable m_notify;
 private:
 	int      m_ret_code   {0};
 	statuses m_bot_status {uninitialized};
 	// image processing data
-	vector<cv::Mat>       m_lib_images;  // library of images to search for
-	vector<cv::Mat>       m_lib_masks;   // masks for each image
+	vector<cv::Mat> m_lib_images,  // library of images to search for
+	                m_lib_masks;   // masks for each image
 	map<string, idx_type> m_lib_img_map; // image library index
-	cv::Mat     *mp_frame_fp     {nullptr};
-	cv::Mat     *mp_frame_rgb    {nullptr};
-	cv::Mat     *mp_frame_yuv    {nullptr};
+	cv::Mat     *mp_frame_fp     {nullptr},
+	            *mp_frame_rgb    {nullptr},
+	            *mp_frame_yuv    {nullptr};
 	// V4L2 data
 	char        *mp_v4l2_buffer  {nullptr};
 	size_t       m_v4l2_buf_size {0};
 	V4l2Capture *mp_v4l2_device  {nullptr};
 	// user defined settings
-	string       m_img_lib_dir;     // path to image library, / at the end is required
-	string       m_adb_name;        // user friendly name of Android device
-	string       m_adb_serial;      // serial number of Android device
-	string       m_v4l2_dev_name;   // v4l2 video device name, for ex.: /dev/video7
+	string       m_img_lib_dir,     // path to image library, / at the end is required
+	             m_adb_name,        // user friendly name of Android device
+	             m_adb_serial,      // serial number of Android device
+	             m_v4l2_dev_name;   // v4l2 video device name, for ex.: /dev/video7
 	unsigned     m_v4l2_dev_num;    // v4l2 video device number, for ex.: 7 for /dev/video7
 	cv::Size     m_resolution;      // user-defined resolution of video stream
-	double       m_scale_factor;    // scaling factor form search images to stream resolution
-	double       m_threshold;       // detection threshold 
+	double       m_scale_factor,    // scaling factor form search images to stream resolution
+	             m_threshold;       // detection threshold 
 	int          m_adb_fps;         // user-defined FPS of video stream
 	millis       m_check_interval;  // bot screen check interval in milliseconds
 	seconds      m_adb_wait_for;    // time to wait for ADB to init in seconds
-	bool         m_dump_frames;     // dump each frame to file
-	bool         m_force_greyscale; // force image detection in greayscale mode
+	bool         m_dump_frames,     // dump each frame to file
+	             m_force_greyscale; // force image detection in greayscale mode
 	// bot (program) state
 	state_itype  mp_state;      // current state iterator
 	set<string>  m_bot_states { // set of possible states
@@ -149,7 +157,8 @@ inline int AndroidBot::detect_image(
 	const string& image_name,
 	cv::Point *pLocation,
 	double    *pCertainty,
-	int        maxLocations)
+	int        maxLocations,
+	condition_variable *pNotify)
 {
 	auto idx = image_idx(image_name);
 	if (!idx) 
@@ -158,7 +167,8 @@ inline int AndroidBot::detect_image(
 		idx,
 		pLocation,
 		pCertainty,
-		maxLocations
+		maxLocations,
+		pNotify
 	);
 }
 
