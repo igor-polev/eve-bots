@@ -77,6 +77,7 @@ AndroidBot::AndroidBot(const char* config_file)
              << e.what() << endl;
         return;
     }
+    m_tap_cmd = string("adb shell -s ") + m_adb_serial + " input ";
     
     // optional JSON settings
     bool check_system {true};

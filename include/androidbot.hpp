@@ -18,6 +18,7 @@
 #include <condition_variable>
 #include <nlohmann/json.hpp>
 
+#include "consolecmd.hpp"
 #include "opencv2/core/types.hpp"
 #include "opencv2/core/mat.hpp"
 #include "V4l2Capture.h"
@@ -70,6 +71,9 @@ protected:
 		initializer_list<idx_type> &idx_list,
 		cv::Point *p_location  = nullptr,
 		double    *p_certainty = nullptr);
+	
+	// screen tapping
+	int tap(cv::Point loc) const;
 		
 	// member access
 	millis check_interval() const noexcept;
@@ -128,6 +132,8 @@ private:
 		DEF_INITIAL_STATE,
 		TERMINATION_STATE
 	};
+	// other stuff
+	string m_tap_cmd;
 	// internal methods
 	void console_ui();        // console user interface
 	void program_loop();      // bot program loop
@@ -231,4 +237,15 @@ inline bool AndroidBot::set_state(const string& new_state)
 inline millis AndroidBot::check_interval() const noexcept
 {
 	return m_check_interval;
+}
+
+inline int AndroidBot::tap(cv::Point loc) const
+{
+    ConsoleCmd cmd {m_tap_cmd
+		+ to_string(loc.x)
+        + " "
+		+ to_string(loc.y)
+        + " &> /dev/null"
+	};
+	return cmd.execute();
 }
