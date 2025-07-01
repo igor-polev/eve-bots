@@ -18,12 +18,15 @@ private:
 	millis m_wait_some;
 	// image library cache
 	idx_type
-		im_UNDOCK_BTN;
+		im_UNDOCK_BTN,
+		im_SHIP_CORE;
 	// images positions cache
 	cv::Point
-		pnt_UNDOCK_BTN {-1, -1};
+		pnt_UNDOCK_BTN {-1, -1},
+		pnt_SHIP_CORE  {-1, -1};
 	// bot states cache
 	state_itype
-		st_UNKNOWN {nullptr},
-		st_DOCKED  {nullptr};
+		st_UNKNOWN   {nullptr},
+		st_DOCKED    {nullptr},
+		st_UNDOCKING {nullptr};
 };

@@ -7,6 +7,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <stdexcept>
 #include <thread>
 #include <csignal>
 #include <unistd.h>
@@ -183,6 +184,29 @@ AndroidBot::AndroidBot(const char* config_file)
     mp_state = m_bot_states.find(DEF_INITIAL_STATE);
     m_bot_status = initialized;
     cout << "Bot initialized.\n";
+
+    // telegram bot using curl
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+    mp_curl = curl_easy_init();
+    if (!mp_curl) {
+        cerr << "--- WARNING (AndroidBot): failed to init curl - telegram bot disabled\n";
+        return;
+    }
+    curl_easy_setopt(
+        mp_curl,
+        CURLOPT_URL,
+        "https://api.telegram.org/bot"
+        "8043028444:AAG2PGAHnw90aQSLOlgeuaIMw1PPLXo85uc"
+        "/sendMessage"
+    );
+    curl_easy_setopt(
+        mp_curl,
+        CURLOPT_HTTPHEADER,
+        (struct curl_slist*)curl_slist_append(
+            NULL,
+            "Content-Type: application/x-www-form-urlencoded"
+        )
+    );
 }
 
 AndroidBot::~AndroidBot()
@@ -192,6 +216,9 @@ AndroidBot::~AndroidBot()
     if (mp_frame_yuv)   delete   mp_frame_yuv;
     if (mp_frame_rgb)   delete   mp_frame_rgb;
     if (mp_frame_fp)    delete   mp_frame_fp;
+
+    if (mp_curl) curl_easy_cleanup(mp_curl);
+    curl_global_cleanup();
 }
 
 bool AndroidBot::collect_images(const json& filenames, bool force_gs)
@@ -346,6 +373,7 @@ int AndroidBot::run()
     thread program_thread(&AndroidBot::program_loop, this);
 
     cout << "Bot is running.\n";
+    telegram_message("Bot started on " + m_adb_name);
     console_ui();
     cout << "Terminating bot...\n";
 
@@ -358,6 +386,7 @@ int AndroidBot::run()
     if (0 != kill(adb_pid, SIGTERM))
         cout << "--- WARNING (run): failed to kill ADB process\n";
     cout << "Bot stopped.\n";
+    telegram_message("Bot terminated on " + m_adb_name);
     return m_ret_code;
 }
 
@@ -450,6 +479,7 @@ void AndroidBot::program_loop()
     try { // each thread requires its own exception handling
         state_itype TERM_STATE  {m_bot_states.find(TERMINATION_STATE)},
                     UNDEF_STATE {m_bot_states.end()};
+        set_state(mp_state); // start time counter
         while (m_bot_status == running) {
             if (TERM_STATE == mp_state || mp_state == UNDEF_STATE) {
                 if (UNDEF_STATE == mp_state) {
@@ -458,8 +488,16 @@ void AndroidBot::program_loop()
                 }
                 break;
             }
+            m_state_time = chrono::duration_cast<seconds>(
+                chrono::steady_clock::now() - m_state_start
+            );
             program(); // ancestor implemented state switch behavior
         }
+    }
+    catch (const runtime_error& e) {
+        cerr << "--- ERROR (program): " << e.what() << endl;
+        telegram_message("Runtime error on " + m_adb_name + ": " + e.what());
+        retcode = -1;
     }
     catch (const exception& e) {
 		cerr << "--- ERROR (program): unhandled exception:\n"

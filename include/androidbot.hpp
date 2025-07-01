@@ -17,6 +17,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <nlohmann/json.hpp>
+#include <curl/curl.h>
 
 #include "consolecmd.hpp"
 #include "opencv2/core/types.hpp"
@@ -24,9 +25,10 @@
 #include "V4l2Capture.h"
 
 using namespace std;
-using json     = nlohmann::json;
-using seconds  = chrono::seconds;
-using millis = chrono::milliseconds;
+using json    = nlohmann::json;
+using seconds = chrono::seconds;
+using millis  = chrono::milliseconds;
+using time_pt = chrono::time_point<chrono::steady_clock>;
 
 class AndroidBot {
 public:
@@ -89,6 +91,7 @@ protected:
 	bool set_state(const string& new_state);
 	bool set_state(const char*   new_state);
 	void set_state(state_itype   new_state_ptr) noexcept; // unsafe pointer operation
+	seconds state_time() const noexcept;
 
 	// ancestor interface - must be implemented in child class
 	virtual bool new_states() = 0; // register new states
@@ -132,8 +135,12 @@ private:
 		DEF_INITIAL_STATE,
 		TERMINATION_STATE
 	};
+	time_pt m_state_start;
+	seconds m_state_time {0};
 	// other stuff
 	string m_tap_cmd;
+	CURL  *mp_curl {nullptr};
+
 	// internal methods
 	void console_ui();        // console user interface
 	void program_loop();      // bot program loop
@@ -147,6 +154,7 @@ private:
 		initializer_list<idx_type> &idx_list,
 		cv::Point &location,
 		double    &certainty);
+	bool telegram_message(const string& msg) const;
 };
 
 ///////////////////////////////////////////////////////////////
@@ -219,19 +227,29 @@ inline void AndroidBot::set_state(state_itype new_state_ptr) noexcept
 {  
 	// warning: unsafe pointer operation
 	// new_state_ptr may point outside of m_bot_states
-	mp_state = new_state_ptr;
+	mp_state      = new_state_ptr;
+	m_state_start = chrono::steady_clock::now();
+	m_state_time  = seconds(0);
 }
 inline bool AndroidBot::set_state(const char* new_state)
 {
     mp_state = m_bot_states.find(new_state);
-    if (mp_state != m_bot_states.end())
+    if (mp_state != m_bot_states.end()) {
+		m_state_start = chrono::steady_clock::now();
+		m_state_time  = seconds(0);
 		return true;
+	}
     else
 		return false;
 }
 inline bool AndroidBot::set_state(const string& new_state)
 {
 	return set_state(new_state.c_str());
+}
+
+inline seconds AndroidBot::state_time() const noexcept
+{
+	return m_state_time;
 }
 
 inline millis AndroidBot::check_interval() const noexcept
@@ -248,4 +266,15 @@ inline int AndroidBot::tap(cv::Point loc) const
         + " &> /dev/null"
 	};
 	return cmd.execute();
+}
+
+inline bool AndroidBot::telegram_message(const string& msg) const
+{
+    if (!mp_curl) return false;
+    curl_easy_setopt(
+        mp_curl,
+        CURLOPT_POSTFIELDS,
+        ("chat_id=6349677666&text=" + msg).c_str()
+    );
+    return CURLE_OK == curl_easy_perform(mp_curl);
 }
