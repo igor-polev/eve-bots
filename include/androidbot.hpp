@@ -17,8 +17,8 @@
 #include <mutex>
 #include <condition_variable>
 #include <nlohmann/json.hpp>
-#include <curl/curl.h>
 
+#include "botlogger.hpp"
 #include "consolecmd.hpp"
 #include "opencv2/core/types.hpp"
 #include "opencv2/core/mat.hpp"
@@ -29,6 +29,7 @@ using json    = nlohmann::json;
 using seconds = chrono::seconds;
 using millis  = chrono::milliseconds;
 using time_pt = chrono::time_point<chrono::steady_clock>;
+using BL      = BotLogger;
 
 class AndroidBot {
 public:
@@ -39,7 +40,7 @@ public:
 		stopped
 	};
   	AndroidBot() = delete;
-    AndroidBot(const char* config_file); // this is the default constructor
+    AndroidBot(const char* config_file, BotLogger& logger);
     virtual ~AndroidBot();
 	statuses status() const noexcept;
 	int run();
@@ -51,34 +52,67 @@ protected:
 	constexpr static const seconds ADB_WAIT_DEFAULT  {5};
 	constexpr static const char   *DEF_INITIAL_STATE {"UNKNOWN"},
 	                              *TERMINATION_STATE {"TERMINATION"};
+ 
 	typedef vector<cv::Mat>::size_type idx_type;
 	typedef set<string>::iterator      state_itype;
 	typedef pair<state_itype, bool>    streg_type;
 
-	// image operations
-	idx_type image_idx(const string& image_name) const;
-	int detect_image(
+	// screen operations - interface
+	int detect(
 		const string& image_name,
+		millis    *p_timeout   = nullptr,
+		cv::Point *p_location  = nullptr,
+		double    *p_certainty = nullptr,
+		int        max_locs    = 1);
+	int detect(
+		const idx_type& idx,
+		millis    *p_timeout   = nullptr,
+		cv::Point *p_location  = nullptr,
+		double    *p_certainty = nullptr,
+		int        max_locs    = 1);
+	int detect(
+		const initializer_list<idx_type>& idx_list,
+		millis    *p_timeout   = nullptr,
+		cv::Point *p_location  = nullptr,
+		double    *p_certainty = nullptr,
+		int        max_locs    = 0); // max_locs is ignored in current implementation
+	int tap(const cv::Point& location) const;
+	int tap(const string&    image_name, millis *p_timeout = nullptr);
+	int tap(const idx_type&  idx,        millis *p_timeout = nullptr);
+private:
+	// screen operations - internal implementation
+	template <typename IMG_ARG>
+	int detect_image(
+		const IMG_ARG& images,
+		millis    *p_timeout   = nullptr,
+		cv::Point *p_location  = nullptr,
+		double    *p_certainty = nullptr,
+		int        max_locs    = 1);
+	int detect_image_once(
+		const idx_type& idx,
 		cv::Point *p_location  = nullptr,
 		double    *p_certainty = nullptr,
 		int        max_locs    = 1,
 		condition_variable *p_notify = nullptr);
-	int detect_image(
-		idx_type   idx,
+	int detect_image_once(
+		const initializer_list<idx_type>& idx_list,
 		cv::Point *p_location  = nullptr,
 		double    *p_certainty = nullptr,
-		int        max_locs    = 1,
-		condition_variable *p_notify = nullptr);
-	int detect_image(
-		initializer_list<idx_type> &idx_list,
-		cv::Point *p_location  = nullptr,
-		double    *p_certainty = nullptr);
-	
-	// screen tapping
-	int tap(cv::Point loc) const;
-		
+		int        max_locs    = 0); // max_locs is ignored in current implementation
+	void detect_image_any(
+		const initializer_list<idx_type>& idx_list,
+		cv::Point &location,
+		double    &certainty);
+	template <typename IMG_ARG>
+	int tap_image(
+		const IMG_ARG& image,
+		millis *p_timeout = nullptr);
+
+protected:
 	// member access
 	millis check_interval() const noexcept;
+	const string& bot_name() const noexcept;
+	idx_type image_idx(const string& image_name) const;
 
 	// bot state manipulation
 	const set<string>& all_states() const noexcept;
@@ -92,11 +126,15 @@ protected:
 	bool set_state(const char*   new_state);
 	void set_state(state_itype   new_state_ptr) noexcept; // unsafe pointer operation
 	seconds state_time() const noexcept;
-
+	bool state_time_out(
+		const seconds& max_time,
+		const char* time_out_state = nullptr
+	);
+	
 	// ancestor interface - must be implemented in child class
 	virtual bool new_states() = 0; // register new states
 	virtual void program()    = 0; // define bot program
-	
+
 	// multi-threading
 	mutex m_mutex_all,
 		  m_mutex_detect;
@@ -107,6 +145,7 @@ private:
 	// image processing data
 	vector<cv::Mat> m_lib_images,  // library of images to search for
 	                m_lib_masks;   // masks for each image
+	vector<string>  m_lib_names;   // image names
 	map<string, idx_type> m_lib_img_map; // image library index
 	cv::Mat     *mp_frame_fp     {nullptr},
 	            *mp_frame_rgb    {nullptr},
@@ -135,11 +174,11 @@ private:
 		DEF_INITIAL_STATE,
 		TERMINATION_STATE
 	};
-	time_pt m_state_start;
-	seconds m_state_time {0};
+	time_pt    m_state_start;
+	seconds    m_state_time {0};
 	// other stuff
-	string m_tap_cmd;
-	CURL  *mp_curl {nullptr};
+	string     m_tap_cmd;
+	BotLogger *mp_log;
 
 	// internal methods
 	void console_ui();        // console user interface
@@ -150,15 +189,15 @@ private:
 		const json& filenames,
 		bool force_gs
 	);
-	void detect_image_any(
-		initializer_list<idx_type> &idx_list,
-		cv::Point &location,
-		double    &certainty);
-	bool telegram_message(const string& msg) const;
 };
 
 ///////////////////////////////////////////////////////////////
 // inline methods implementation
+
+inline const string& AndroidBot::bot_name() const noexcept
+{
+	return m_adb_name;
+}
 
 inline AndroidBot::statuses AndroidBot::status() const noexcept
 {
@@ -169,19 +208,6 @@ inline AndroidBot::idx_type AndroidBot::image_idx(const string& image_name) cons
 {
 	auto idx = m_lib_img_map.find(image_name);
 	return idx != m_lib_img_map.end() ? idx->second : 0;
-}
-
-inline int AndroidBot::detect_image(
-	const string& image_name,
-	cv::Point *p_location,
-	double    *p_certainty,
-	int        max_locs,
-	condition_variable *p_notify)
-{
-	auto idx = image_idx(image_name);
-	if (!idx) 
-		throw out_of_range(image_name + " does not exist in image library");
-	return detect_image(idx, p_location, p_certainty, max_locs, p_notify);
 }
 
 inline const set<string>& AndroidBot::all_states() const noexcept
@@ -227,16 +253,16 @@ inline void AndroidBot::set_state(state_itype new_state_ptr) noexcept
 {  
 	// warning: unsafe pointer operation
 	// new_state_ptr may point outside of m_bot_states
+	if (mp_state == new_state_ptr) return;
 	mp_state      = new_state_ptr;
 	m_state_start = chrono::steady_clock::now();
 	m_state_time  = seconds(0);
 }
 inline bool AndroidBot::set_state(const char* new_state)
 {
-    mp_state = m_bot_states.find(new_state);
-    if (mp_state != m_bot_states.end()) {
-		m_state_start = chrono::steady_clock::now();
-		m_state_time  = seconds(0);
+    auto new_state_ptr = m_bot_states.find(new_state);
+    if (new_state_ptr != m_bot_states.end()) {
+		set_state(new_state_ptr);
 		return true;
 	}
     else
@@ -257,24 +283,92 @@ inline millis AndroidBot::check_interval() const noexcept
 	return m_check_interval;
 }
 
-inline int AndroidBot::tap(cv::Point loc) const
+inline int AndroidBot::detect
+(
+	const string& image_name,
+	millis    *p_timeout,
+	cv::Point *p_location,
+	double    *p_certainty,
+	int        max_locs)
+{
+	auto idx = image_idx(image_name);
+	if (!idx)
+		throw out_of_range(image_name + " does not exist in image library");
+	return detect_image<idx_type>(
+		idx,
+		p_timeout,
+		p_location,
+		p_certainty,
+		max_locs
+	);
+}
+inline int AndroidBot::detect(
+	const idx_type& idx,
+	millis    *p_timeout,
+	cv::Point *p_location,
+	double    *p_certainty,
+	int        max_locs)
+{
+	return detect_image<idx_type>(
+		idx,
+		p_timeout,
+		p_location,
+		p_certainty,
+		max_locs
+	);
+}
+inline int AndroidBot::detect(
+	const initializer_list<idx_type>& idx_list,
+	millis    *p_timeout,
+	cv::Point *p_location,
+	double    *p_certainty,
+	int        max_locs)
+{
+	return detect_image<initializer_list<idx_type>>(
+		idx_list,
+		p_timeout,
+		p_location,
+		p_certainty,
+		max_locs
+	);
+}
+
+inline int AndroidBot::tap(const cv::Point& location) const
 {
     ConsoleCmd cmd {m_tap_cmd
-		+ to_string(loc.x)
+		+ to_string(location.x)
         + " "
-		+ to_string(loc.y)
+		+ to_string(location.y)
         + " &> /dev/null"
 	};
 	return cmd.execute();
 }
-
-inline bool AndroidBot::telegram_message(const string& msg) const
+inline int AndroidBot::tap(const string& image_name, millis *p_timeout)
 {
-    if (!mp_curl) return false;
-    curl_easy_setopt(
-        mp_curl,
-        CURLOPT_POSTFIELDS,
-        ("chat_id=6349677666&text=" + msg).c_str()
-    );
-    return CURLE_OK == curl_easy_perform(mp_curl);
+	return tap_image<string>(image_name, p_timeout);
+}
+inline int AndroidBot::tap(const idx_type& idx, millis *p_timeout)
+{
+	return tap_image<idx_type>(idx, p_timeout);
+}
+template <typename IMG_ARG>
+inline int AndroidBot::tap_image(const IMG_ARG& image, millis *p_timeout)
+{
+	cv::Point pnt;
+	if (!detect_image<IMG_ARG>(image, p_timeout, &pnt))
+		return -1;
+	return tap(pnt);
+}
+
+inline bool AndroidBot::state_time_out(
+	const seconds& max_time,
+	const char* time_out_state)
+{
+	if (state_time() > max_time) {
+		mp_log->write(state() + " state timeout", BL::WARNING);
+		if (time_out_state)
+			set_state(time_out_state);
+		return true;
+	} else
+		return false;
 }

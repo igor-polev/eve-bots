@@ -14,19 +14,21 @@ public:
 	bool new_states() override;
 	void program()    override;
 private:
-	// specific parameters
-	millis m_wait_some;
 	// image library cache
 	idx_type
 		im_UNDOCK_BTN,
-		im_SHIP_CORE;
+		im_SHIP_CORE,
+		im_OV_FILTER,
+		im_OV_BUTTON;
 	// images positions cache
 	cv::Point
 		pnt_UNDOCK_BTN {-1, -1},
 		pnt_SHIP_CORE  {-1, -1};
 	// bot states cache
 	state_itype
-		st_UNKNOWN   {nullptr},
-		st_DOCKED    {nullptr},
-		st_UNDOCKING {nullptr};
+		st_TERMINATION {nullptr},
+		st_UNKNOWN     {nullptr},
+		st_CANCEL      {nullptr},
+		st_DOCKED      {nullptr},
+		st_UNDOCKING   {nullptr};
 };

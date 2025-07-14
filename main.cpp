@@ -40,17 +40,17 @@ int main(int argc, char* argv[])
 		}
 		EveMinerBot bot(argv[1]);
 		if (bot.status() != AndroidBot::statuses::initialized) {
-			cerr << "--- ERROR (main): failed to initialize bot.\n";
+			cerr << "   [ERROR] Failed to initialize bot.\n";
 			return -1;
 		}
 		return bot.run();
 	}
     catch (const exception& e) {
-		cerr << "--- ERROR (main): unhandled exception:\n"
+		cerr << "   [ERROR] Unhandled exception in main():\n"
              << e.what() << endl;
 	}
 	catch(...) {
-		cerr << "--- ERROR (main): unknown excepition type, terminating.\n";
+		cerr << "   [ERROR] Unknown excepition in main().\n";
 	}
 	return -1; // exception was thrown
 }
