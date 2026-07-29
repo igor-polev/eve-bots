@@ -4,6 +4,9 @@ out/
 vcpkg_installed/
 compile_commands.json
 
+# screen dumps produced by the 'dump' command
+eve_dump_*.png
+
 .vscode/*
 !.vscode/settings.json
 !.vscode/launch.json
