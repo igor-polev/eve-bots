@@ -1,3 +1,11 @@
-.cache/***
-.vscode/***
-build/***
+.cache/
+build/
+out/
+vcpkg_installed/
+compile_commands.json
+
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/c_cpp_properties.json
