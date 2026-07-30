@@ -1,5 +1,7 @@
 {
-    "EVE_WINDOW_CLASS_NAME": "trinityWindow",
-    "EVE_WINDOW_TITLE_PREFIX": "EVE - ",
-    "CAPTURE_FRAME_RATE_DEFAULT": 5
+    "EVE_WINDOW_CLASS_NAME"     : "trinityWindow",
+    "EVE_WINDOW_TITLE_PREFIX"   : "EVE - ",
+    "CAPTURE_FRAME_RATE_DEFAULT": 5,
+    "IMAGE_LIBRARY_DIR"         : "img_lib",
+    "DETECT_THRESHOLD_DEFAULT"  : 0.9
 }

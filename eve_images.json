@@ -1,0 +1,15 @@
+{
+    "IMAGES": [
+        {
+            "NAME"   : "undock_button",
+            "FILE"   : "undock_button.png",
+            "COMMENT": "Undock button in the station panel, cut from a 3440x1392 client frame"
+        },
+        {
+            "NAME"     : "undock_button_masked",
+            "FILE"     : "undock_button_masked.png",
+            "COMMENT"  : "Same button with a transparent 10 pixel border - only the opaque middle has to match",
+            "THRESHOLD": 0.9
+        }
+    ]
+}

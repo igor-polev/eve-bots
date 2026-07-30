@@ -30,8 +30,15 @@ public:
 	const EveWindowMatch& eve_window() const noexcept { return m_eve_window; }
 	unsigned capture_frame_rate() const noexcept { return m_capture_frame_rate; }
 
+	// Folder holding the pattern images, resolved against the settings file.
+	const std::wstring& image_dir() const noexcept { return m_image_dir; }
+	// Match certainty a hit must reach when a pattern names no threshold.
+	double detect_threshold() const noexcept { return m_detect_threshold; }
+
 private:
 	std::wstring   m_source;
 	EveWindowMatch m_eve_window;
 	unsigned       m_capture_frame_rate {0};
+	std::wstring   m_image_dir;
+	double         m_detect_threshold {0.0};
 };

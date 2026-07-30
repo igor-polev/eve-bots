@@ -10,6 +10,7 @@
 #include <windows.h>
 #include <nlohmann/json.hpp>
 
+#include "paths.hpp"
 #include "settings.hpp"
 #include "text_util.hpp"
 
@@ -20,25 +21,8 @@ namespace {
 constexpr const char* KEY_WINDOW_CLASS = "EVE_WINDOW_CLASS_NAME";
 constexpr const char* KEY_TITLE_PREFIX = "EVE_WINDOW_TITLE_PREFIX";
 constexpr const char* KEY_FRAME_RATE   = "CAPTURE_FRAME_RATE_DEFAULT";
-
-// Directory holding the running executable, without a trailing separator.
-std::wstring exe_directory()
-{
-	std::wstring path(MAX_PATH, L'\0');
-	for (;;) {
-		const DWORD copied = GetModuleFileNameW(
-			nullptr, path.data(), static_cast<DWORD>(path.size())
-		);
-		if (0 == copied) return L".";
-		if (copied < path.size()) {
-			path.resize(copied);
-			break;
-		}
-		path.resize(path.size() * 2); // truncated - retry with more room
-	}
-	const size_t separator = path.find_last_of(L"\\/");
-	return std::wstring::npos == separator ? L"." : path.substr(0, separator);
-}
+constexpr const char* KEY_IMAGE_DIR    = "IMAGE_LIBRARY_DIR";
+constexpr const char* KEY_THRESHOLD    = "DETECT_THRESHOLD_DEFAULT";
 
 // Reads a required string setting.
 std::wstring read_string(const json& settings, const char* key)
@@ -53,26 +37,15 @@ std::wstring read_string(const json& settings, const char* key)
 
 bool Settings::load(std::string& error)
 {
-	const std::wstring candidates[] {
-		FILE_NAME,                                   // working directory
-		exe_directory() + L"\\" + FILE_NAME          // next to the exe
-	};
-
-	std::string tried;
-	for (const std::wstring& path : candidates) {
-		std::string attempt_error;
-		if (load_file(path, attempt_error))
-			return true;
-		// Report the first real problem: a file that exists but is broken
-		// is far more interesting than one that is simply absent.
-		if (std::ifstream {path}.good()) {
-			error = attempt_error;
-			return false;
-		}
-		tried += "\n    " + to_utf8(path);
+	std::vector<std::wstring> tried;
+	const std::wstring path = find_config_file(FILE_NAME, &tried);
+	if (path.empty()) {
+		error = to_utf8(FILE_NAME) + std::string(" not found; looked in:");
+		for (const std::wstring& candidate : tried)
+			error += "\n    " + to_utf8(candidate);
+		return false;
 	}
-	error = std::string(to_utf8(FILE_NAME)) + " not found; looked in:" + tried;
-	return false;
+	return load_file(path, error);
 }
 
 bool Settings::load_file(const std::wstring& path, std::string& error)
@@ -93,10 +66,13 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 	}
 
 	EveWindowMatch eve_window;
+	std::wstring image_dir;
 	int64_t frame_rate {0};
+	double  threshold  {0.0};
 	try {
 		eve_window.class_name   = read_string(settings, KEY_WINDOW_CLASS);
 		eve_window.title_prefix = read_string(settings, KEY_TITLE_PREFIX);
+		image_dir               = read_string(settings, KEY_IMAGE_DIR);
 
 		const json& rate = settings.at(KEY_FRAME_RATE);
 		if (!rate.is_number_integer())
@@ -104,6 +80,13 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 				std::string(KEY_FRAME_RATE) + " must be a whole number"
 			);
 		frame_rate = rate.get<int64_t>();
+
+		const json& certainty = settings.at(KEY_THRESHOLD);
+		if (!certainty.is_number())
+			throw std::runtime_error(
+				std::string(KEY_THRESHOLD) + " must be a number"
+			);
+		threshold = certainty.get<double>();
 	}
 	catch (const json::out_of_range&) {
 		// at() names the missing key in its message, but not helpfully
@@ -111,7 +94,9 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		      + "; required keys are "
 		      + KEY_WINDOW_CLASS + ", "
 		      + KEY_TITLE_PREFIX + ", "
-		      + KEY_FRAME_RATE;
+		      + KEY_FRAME_RATE   + ", "
+		      + KEY_IMAGE_DIR    + ", "
+		      + KEY_THRESHOLD;
 		return false;
 	}
 	catch (const std::exception& e) {
@@ -132,9 +117,23 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		      + " (got " + std::to_string(frame_rate) + ")";
 		return false;
 	}
+	if (threshold <= 0.0 || threshold > 1.0) {
+		error = std::string(KEY_THRESHOLD)
+		      + " must be greater than 0 and at most 1 (got "
+		      + std::to_string(threshold) + ")";
+		return false;
+	}
+	if (image_dir.empty()) {
+		error = std::string(KEY_IMAGE_DIR) + " is empty in " + to_utf8(path);
+		return false;
+	}
 
 	m_eve_window         = std::move(eve_window);
 	m_capture_frame_rate = static_cast<unsigned>(frame_rate);
+	m_detect_threshold   = threshold;
+	// a relative image folder is meant relative to the settings file,
+	// not to whatever directory the app happens to be started from
+	m_image_dir          = join_path(directory_of(path), image_dir);
 	m_source             = path;
 	return true;
 }

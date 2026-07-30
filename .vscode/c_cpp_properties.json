@@ -4,12 +4,16 @@
             "name": "Win32",
             "includePath": [
                 "${workspaceFolder}/include",
-                "${workspaceFolder}/src"
+                "${workspaceFolder}/src",
+                "${workspaceFolder}/build/windows-msvc/vcpkg_installed/x64-windows/include",
+                "${workspaceFolder}/build/windows-msvc/vcpkg_installed/x64-windows/include/opencv4"
             ],
             "defines": [
                 "_DEBUG",
                 "UNICODE",
-                "_UNICODE"
+                "_UNICODE",
+                "WIN32_LEAN_AND_MEAN",
+                "NOMINMAX"
             ],
             "windowsSdkVersion": "10.0.26100.0",
             "compilerPath": "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe",

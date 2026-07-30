@@ -10,14 +10,19 @@
 
 #include <windows.h>
 #include <winrt/base.h>
+#include <opencv2/core/utils/logger.hpp>
 
 #include "cli.hpp"
+#include "image_library.hpp"
 #include "settings.hpp"
 
 int main()
 {
 	// window titles are printed as UTF-8
 	SetConsoleOutputCP(CP_UTF8);
+	// OpenCV reports every optional parallel backend it fails to load the
+	// first time it is used; the console is our user interface, keep it quiet
+	cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_WARNING);
 
 	try {
 		// multi-threaded apartment: the capture thread uses WinRT too
@@ -30,7 +35,18 @@ int main()
 			return -1;
 		}
 
-		Cli cli {settings};
+		// A bot that cannot see is useless, so a broken image library is
+		// as fatal as broken settings - better to say so at startup than
+		// to fail at the first detection.
+		ImageLibrary images;
+		if (!images.load(
+				settings.image_dir(), settings.detect_threshold(), error))
+		{
+			std::cerr << "   [ERROR] " << error << std::endl;
+			return -1;
+		}
+
+		Cli cli {settings, images};
 		return cli.run();
 	}
 	catch (const winrt::hresult_error& e) {
