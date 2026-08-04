@@ -5,8 +5,6 @@
 	UndockProgram implementation.
 */
 
-#include <algorithm>
-#include <cctype>
 #include <iomanip>
 #include <sstream>
 
@@ -47,15 +45,6 @@ std::string point_text(const cv::Point& at)
 	return std::to_string(at.x) + "," + std::to_string(at.y);
 }
 
-std::string to_lower(std::string text)
-{
-	std::transform(
-		text.begin(), text.end(), text.begin(),
-		[](unsigned char c) { return static_cast<char>(::tolower(c)); }
-	);
-	return text;
-}
-
 } // namespace
 
 std::string UndockProgram::purpose() const
@@ -68,8 +57,7 @@ std::string UndockProgram::settings_text() const
 	return std::string(KEY_SEARCH_TIMEOUT) + " "
 	     + std::to_string(m_search_timeout.count()) + " ms, "
 	     + KEY_UNDOCK_TIMEOUT + " "
-	     + std::to_string(m_undock_timeout.count()) + " ms, "
-	     + KEY_CLICK_METHOD + " " + click_method_text(m_click);
+	     + std::to_string(m_undock_timeout.count()) + " ms";
 }
 
 bool UndockProgram::configure(const ProgramParams& params, std::string& error)
@@ -82,17 +70,6 @@ bool UndockProgram::configure(const ProgramParams& params, std::string& error)
 	if (search <= 0.0 || undock <= 0.0) {
 		error = std::string(KEY_SEARCH_TIMEOUT) + " and " + KEY_UNDOCK_TIMEOUT
 		      + " are milliseconds and must be greater than zero";
-		return false;
-	}
-
-	const std::string method =
-		to_lower(params.text(name(), KEY_CLICK_METHOD, "auto"));
-	if      ("auto" == method) m_click = ClickMethod::AUTO;
-	else if ("send" == method) m_click = ClickMethod::SEND;
-	else if ("post" == method) m_click = ClickMethod::POST;
-	else {
-		error = std::string(KEY_CLICK_METHOD)
-		      + " must be \"auto\", \"send\" or \"post\"";
 		return false;
 	}
 
@@ -177,8 +154,8 @@ ProgramResult UndockProgram::run(ProgramContext& context)
 		corner + cv::Point {button.width() / 2, button.height() / 2};
 
 	ClickResult clicked;
-	if (!click_at(context.capture.target(), target, m_click,
-	              UI_WAIT_DEFAULT, clicked, trouble))
+	if (!click_at(context.capture.target(), target, UI_WAIT_DEFAULT,
+	              clicked, trouble))
 	{
 		return {ProgramExit::FAILURE,
 		        "cannot click the undock button at " + point_text(target)
@@ -203,8 +180,8 @@ ProgramResult UndockProgram::run(ProgramContext& context)
 	case Look::MISSING:
 		return {ProgramExit::FAILURE,
 		        "clicked undock at " + point_text(target)
-		        + " by " + click_method_text(clicked.method)
-		        + ", but no ship core within "
+		        + " (screen " + point_text(clicked.screen)
+		        + "), but no ship core within "
 		        + seconds_text(m_undock_timeout)
 		        + " - did the click register?"};
 	default:
@@ -214,7 +191,6 @@ ProgramResult UndockProgram::run(ProgramContext& context)
 	return {ProgramExit::SUCCESS,
 	        "undocked in " + seconds_text(since(started))
 	        + ": clicked " + point_text(target)
-	        + " by " + click_method_text(clicked.method)
 	        + ", ship core at " + point_text(core)
 	        + " after " + seconds_text(since(pressed))};
 }

@@ -58,13 +58,10 @@ constexpr const char* HELP_TEXT =
 constexpr const char* CLICK_USAGE =
 	"Usage: click <image> [options]     the middle of a detected pattern\n"
 	"       click <x> <y> [options]     a point, in capture frame pixels\n"
+	"The click is made with SendInput, which means the game is brought to\n"
+	"the front first and the real cursor is moved: a click on an inactive\n"
+	"window is swallowed to activate it instead of acting.\n"
 	"Options:\n"
-	"    auto        SendInput while the window is active, PostMessage when\n"
-	"                it is not - the default\n"
-	"    send        always SendInput: system wide, moves the real cursor,\n"
-	"                only reaches the foreground window\n"
-	"    post        always PostMessage: reaches a background window and\n"
-	"                leaves the cursor alone, if the game listens for it\n"
 	"    find        search for the pattern when none has been detected yet\n"
 	"                (the default); nofind fails instead\n"
 	"    refresh     search again even though a position is remembered;\n"
@@ -548,7 +545,7 @@ void Cli::cmd_programs() const
 	for (size_t i = 0; i < m_programs.size(); ++i) {
 		const Program& program = m_programs(i);
 		std::cout << "  [" << i << "] " << program.name()
-		          << "  " << program.purpose() << "\n"
+		          << " -- " << program.purpose() << "\n"
 		          << "      " << program.settings_text() << "\n";
 	}
 	std::cout << "Parameters: "
@@ -633,18 +630,14 @@ void Cli::cmd_click(const std::vector<std::string>& args)
 		first_option = 2;
 	}
 
-	ClickMethod method  {ClickMethod::AUTO};
-	bool        find    {true};
-	bool        refresh {false};
-	int         wait_ms {UI_WAIT_DEFAULT};
-	bool        chosen  {false};   // find or refresh named explicitly
+	bool find    {true};
+	bool refresh {false};
+	int  wait_ms {UI_WAIT_DEFAULT};
+	bool chosen  {false};   // find or refresh named explicitly
 
 	for (size_t i = first_option; i < args.size(); ++i) {
 		const std::string option = to_lower(args[i]);
-		if      ("auto"    == option) method  = ClickMethod::AUTO;
-		else if ("send"    == option) method  = ClickMethod::SEND;
-		else if ("post"    == option) method  = ClickMethod::POST;
-		else if ("find"    == option) { find    = true;  chosen = true; }
+		if      ("find"    == option) { find    = true;  chosen = true; }
 		else if ("nofind"  == option) { find    = false; chosen = true; }
 		else if ("refresh" == option) { refresh = true;  chosen = true; }
 		else if ("norefresh" == option) { refresh = false; chosen = true; }
@@ -657,6 +650,7 @@ void Cli::cmd_click(const std::vector<std::string>& args)
 			std::cout << "Unknown click option: " << args[i] << "\n"
 			          << CLICK_USAGE;
 			return;
+
 		}
 	}
 
@@ -708,18 +702,15 @@ void Cli::cmd_click(const std::vector<std::string>& args)
 
 	ClickResult result;
 	std::string error;
-	if (!click_at(m_capture.target(), target, method, wait_ms, result, error)) {
+	if (!click_at(m_capture.target(), target, wait_ms, result, error)) {
 		std::cout << "   [ERROR] " << error << "\n";
 		return;
 	}
 
-	const bool posted = ClickMethod::POST == result.method;
-	const cv::Point& landed = posted ? result.client : result.screen;
 	std::cout << "Clicked " << what
 	          << "frame " << result.frame.x << "," << result.frame.y
-	          << " -> " << (posted ? "client " : "screen ")
-	          << landed.x << "," << landed.y
-	          << " (" << click_method_text(result.method) << ")";
-	if (wait_ms > 0) std::cout << ", waited " << wait_ms << " ms";
+	          << " -> screen " << result.screen.x << "," << result.screen.y;
+	if (result.activated) std::cout << ", raised the window first";
+	if (wait_ms > 0)      std::cout << ", waited " << wait_ms << " ms";
 	std::cout << "\n";
 }

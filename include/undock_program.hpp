@@ -28,7 +28,6 @@ public:
 	// Parameter names in prog_params.json, and what they mean without it.
 	static constexpr const char* KEY_SEARCH_TIMEOUT = "SEARCH_TIMEOUT";
 	static constexpr const char* KEY_UNDOCK_TIMEOUT = "UNDOCK_TIMEOUT";
-	static constexpr const char* KEY_CLICK_METHOD   = "CLICK_METHOD";
 	static constexpr int SEARCH_TIMEOUT_DEFAULT = 15000;   // ms
 	static constexpr int UNDOCK_TIMEOUT_DEFAULT = 45000;   // ms
 
@@ -57,9 +56,4 @@ private:
 
 	std::chrono::milliseconds m_search_timeout {SEARCH_TIMEOUT_DEFAULT};
 	std::chrono::milliseconds m_undock_timeout {UNDOCK_TIMEOUT_DEFAULT};
-
-	// Left on AUTO this picks PostMessage whenever the console has focus,
-	// which is nearly always while a program runs from the prompt. Set
-	// CLICK_METHOD to "send" if the game ignores posted mouse messages.
-	ClickMethod m_click {ClickMethod::AUTO};
 };

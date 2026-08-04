@@ -20,18 +20,30 @@ namespace {
 // samples. 40 ms comfortably outlasts one frame at the low end.
 constexpr std::chrono::milliseconds CLICK_HOLD {40};
 
+// Gap between putting the cursor on the target and pressing the button.
+// The two used to travel in one SendInput batch, arriving in the same
+// instant, which left the game no frame in which to notice the pointer had
+// arrived - a control that highlights on hover never saw the hover.
+constexpr std::chrono::milliseconds MOVE_SETTLE {80};
+
+// Activation is asynchronous, so it has to be waited for rather than
+// assumed, and a window that has just come forward needs a moment before
+// it is listening again.
+constexpr std::chrono::milliseconds FOCUS_TIMEOUT {1500};
+constexpr std::chrono::milliseconds FOCUS_POLL    {25};
+constexpr std::chrono::milliseconds FOCUS_SETTLE  {150};
+
 std::string last_error_text(const char* call)
 {
 	return std::string(call) + " failed, error "
 	     + std::to_string(GetLastError());
 }
 
-// Maps a capture frame point onto the desktop and into the client area.
+// Maps a capture frame point onto the desktop.
 bool map_point(
 	HWND             window,
 	const cv::Point& frame,
 	cv::Point&       screen,
-	cv::Point&       client,
 	std::string&     error)
 {
 	RECT bounds {};
@@ -44,97 +56,75 @@ bool map_point(
 		return false;
 	}
 	screen = cv::Point {bounds.left + frame.x, bounds.top + frame.y};
-
-	// Client coordinates are the same desktop point measured from the top
-	// left of the client area, which sits inside the frame by the border
-	// and title bar.
-	POINT origin {0, 0};
-	if (!ClientToScreen(window, &origin)) {
-		error = last_error_text("ClientToScreen");
-		return false;
-	}
-	client = cv::Point {screen.x - origin.x, screen.y - origin.y};
 	return true;
 }
 
-// Absolute SendInput coordinates are 0..65535 across the whole virtual
-// desktop, not pixels, and not relative to any one monitor.
-bool click_send_input(const cv::Point& screen, std::string& error)
+// Name of whatever window owns a point on the desktop, for the message
+// that explains a refused click.
+std::string window_name(HWND window)
 {
-	const int left   = GetSystemMetrics(SM_XVIRTUALSCREEN);
-	const int top    = GetSystemMetrics(SM_YVIRTUALSCREEN);
-	const int width  = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-	const int height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-	if (width < 2 || height < 2) {
-		error = "cannot size the virtual desktop";
-		return false;
-	}
+	wchar_t title[128] {};
+	const int length = GetWindowTextW(window, title, 128);
+	if (length <= 0) return "another window";
 
-	INPUT press[2] {};
-	press[0].type         = INPUT_MOUSE;
-	press[0].mi.dwFlags   = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
-	                      | MOUSEEVENTF_VIRTUALDESK;
-	press[0].mi.dx        = static_cast<LONG>(
-		(screen.x - left) * 65535LL / (width  - 1));
-	press[0].mi.dy        = static_cast<LONG>(
-		(screen.y - top)  * 65535LL / (height - 1));
-	press[1].type         = INPUT_MOUSE;
-	press[1].mi.dwFlags   = MOUSEEVENTF_LEFTDOWN;
-
-	if (2 != SendInput(2, press, sizeof(INPUT))) {
-		error = last_error_text("SendInput");
-		return false;
+	// The console is UTF-8 and these titles are only ever shown to a
+	// person, so a lossy narrowing is good enough here.
+	std::string name;
+	for (int i = 0; i < length; ++i) {
+		const wchar_t c = title[i];
+		name += (c < 32 || c > 126) ? '?' : static_cast<char>(c);
 	}
-	std::this_thread::sleep_for(CLICK_HOLD);
-
-	INPUT release {};
-	release.type       = INPUT_MOUSE;
-	release.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-	if (1 != SendInput(1, &release, sizeof(INPUT))) {
-		// the button is down and staying down - say so plainly
-		error = "the mouse button was pressed but "
-		      + last_error_text("SendInput") + " on release";
-		return false;
-	}
-	return true;
+	return "'" + name + "'";
 }
 
-// The move first, because a window that tracks hover state has to be told
-// the pointer arrived before it is told the button went down there.
-bool click_post_message(HWND window, const cv::Point& client, std::string& error)
+// Brings a window to the front and waits until it really is there.
+bool bring_to_front(HWND window, bool& activated, std::string& error)
 {
-	const LPARAM at = MAKELPARAM(client.x, client.y);
-	if (!PostMessageW(window, WM_MOUSEMOVE, 0, at) ||
-		!PostMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, at))
+	activated = false;
+	if (GetForegroundWindow() == window) return true;
+
+	activated = true;
+	if (IsIconic(window)) ShowWindow(window, SW_RESTORE);
+
+	// Windows only lets the process that already owns the foreground, or
+	// that supplied the last input, hand it to somebody else; everyone
+	// else just gets a flashing taskbar button. Attaching our input queue
+	// to the foreground window's thread makes Windows treat the two as
+	// one thread, which is the documented way past that rule.
+	const HWND  front  = GetForegroundWindow();
+	const DWORD ours   = GetCurrentThreadId();
+	const DWORD theirs = front ? GetWindowThreadProcessId(front, nullptr) : 0;
+	const bool  shared = theirs && theirs != ours;
+	if (shared) AttachThreadInput(ours, theirs, TRUE);
+
+	SetForegroundWindow(window);
+	BringWindowToTop(window);
+
+	if (shared) AttachThreadInput(ours, theirs, FALSE);
+
+	for (std::chrono::milliseconds waited {0};
+	     waited < FOCUS_TIMEOUT;
+	     waited += FOCUS_POLL)
 	{
-		error = last_error_text("PostMessage");
-		return false;
+		if (GetForegroundWindow() == window) {
+			// Being in front is not the same as being ready for input: the
+			// game picks its input handling back up on the next frame.
+			std::this_thread::sleep_for(FOCUS_SETTLE);
+			return true;
+		}
+		std::this_thread::sleep_for(FOCUS_POLL);
 	}
-	std::this_thread::sleep_for(CLICK_HOLD);
 
-	if (!PostMessageW(window, WM_LBUTTONUP, 0, at)) {
-		error = "the mouse button was pressed but "
-		      + last_error_text("PostMessage") + " on release";
-		return false;
-	}
-	return true;
+	error = "the window would not come to the front, and a click on an "
+	        "inactive window is swallowed to activate it instead of acting";
+	return false;
 }
 
 } // namespace
 
-std::string click_method_text(ClickMethod method)
-{
-	switch (method) {
-	case ClickMethod::SEND: return "SendInput";
-	case ClickMethod::POST: return "PostMessage";
-	default:                return "auto";
-	}
-}
-
 bool click_at(
 	HWND             window,
 	const cv::Point& frame,
-	ClickMethod      method,
 	int              wait_ms,
 	ClickResult&     result,
 	std::string&     error)
@@ -157,23 +147,77 @@ bool click_at(
 
 	result = ClickResult {};
 	result.frame = frame;
-	if (!map_point(window, frame, result.screen, result.client, error))
-		return false;
+	if (!map_point(window, frame, result.screen, error)) return false;
 
-	// SendInput only ever reaches the foreground window, so an unattended
-	// click on a background window goes by message instead of landing in
-	// whatever the user happens to be working in.
-	result.method = method;
-	if (ClickMethod::AUTO == method) {
-		result.method = GetForegroundWindow() == window
-			? ClickMethod::SEND
-			: ClickMethod::POST;
+	// Before anything else, because an inactive window eats the click that
+	// activates it, and because this changes what is on top at the point
+	// the occlusion check below looks at.
+	if (!bring_to_front(window, result.activated, error)) return false;
+
+	// The window moves while it is coming forward on some setups, so the
+	// point is mapped again now that it has settled.
+	if (!map_point(window, frame, result.screen, error)) return false;
+
+	// Capture sees through whatever is covering the game, so a pattern can
+	// be found at a point that on screen belongs to somebody else. Clicking
+	// it would press a button in that application instead.
+	const POINT at {result.screen.x, result.screen.y};
+	const HWND  owner = GetAncestor(WindowFromPoint(at), GA_ROOT);
+	if (owner != window) {
+		error = "cannot click " + std::to_string(result.screen.x) + ","
+		      + std::to_string(result.screen.y) + ": "
+		      + (owner ? window_name(owner) : std::string("another window"))
+		      + " is on top there even after raising the game";
+		return false;
 	}
 
-	const bool clicked = ClickMethod::SEND == result.method
-		? click_send_input(result.screen, error)
-		: click_post_message(window, result.client, error);
-	if (!clicked) return false;
+	// Absolute SendInput coordinates are 0..65535 across the whole virtual
+	// desktop, not pixels, and not relative to any one monitor.
+	const int left   = GetSystemMetrics(SM_XVIRTUALSCREEN);
+	const int top    = GetSystemMetrics(SM_YVIRTUALSCREEN);
+	const int width  = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+	const int height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+	if (width < 2 || height < 2) {
+		error = "cannot size the virtual desktop";
+		return false;
+	}
+
+	// Move, press and release go one at a time with a pause between, so
+	// each lands in a different rendered frame. Sent together they arrive
+	// in the same instant and the game can miss the pointer ever being
+	// there.
+	INPUT move {};
+	move.type       = INPUT_MOUSE;
+	move.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
+	                | MOUSEEVENTF_VIRTUALDESK;
+	move.mi.dx      = static_cast<LONG>(
+		(result.screen.x - left) * 65535LL / (width  - 1));
+	move.mi.dy      = static_cast<LONG>(
+		(result.screen.y - top)  * 65535LL / (height - 1));
+	if (1 != SendInput(1, &move, sizeof(INPUT))) {
+		error = last_error_text("SendInput") + " on move";
+		return false;
+	}
+	std::this_thread::sleep_for(MOVE_SETTLE);
+
+	INPUT press {};
+	press.type       = INPUT_MOUSE;
+	press.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+	if (1 != SendInput(1, &press, sizeof(INPUT))) {
+		error = last_error_text("SendInput") + " on press";
+		return false;
+	}
+	std::this_thread::sleep_for(CLICK_HOLD);
+
+	INPUT release {};
+	release.type       = INPUT_MOUSE;
+	release.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+	if (1 != SendInput(1, &release, sizeof(INPUT))) {
+		// the button is down and staying down - say so plainly
+		error = "the mouse button was pressed but "
+		      + last_error_text("SendInput") + " on release";
+		return false;
+	}
 
 	if (wait_ms > 0)
 		std::this_thread::sleep_for(std::chrono::milliseconds {wait_ms});
