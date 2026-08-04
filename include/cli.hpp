@@ -18,7 +18,7 @@
 class Cli {
 public:
 	// settings and images must outlive the Cli object.
-	Cli(const Settings& settings, const ImageLibrary& images)
+	Cli(const Settings& settings, ImageLibrary& images)
 		: m_settings {settings}, m_images {images} {}
 
 	// Reads and dispatches commands until 'exit'. Returns process exit code.
@@ -38,8 +38,8 @@ private:
 
 	void print_windows() const;
 
-	const Settings&     m_settings;
-	const ImageLibrary& m_images;
+	const Settings& m_settings;
+	ImageLibrary&   m_images;
 
 	// Result of the last 'find', so 'start <n>' can refer to it.
 	std::vector<WindowInfo> m_windows;

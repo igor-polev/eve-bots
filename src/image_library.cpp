@@ -5,6 +5,7 @@
 	ImageLibrary implementation.
 */
 
+#include <cctype>
 #include <fstream>
 
 #include <nlohmann/json.hpp>
@@ -24,6 +25,50 @@ constexpr const char* KEY_NAME      = "NAME";
 constexpr const char* KEY_FILE      = "FILE";
 constexpr const char* KEY_COMMENT   = "COMMENT";
 constexpr const char* KEY_THRESHOLD = "THRESHOLD";
+constexpr const char* KEY_FIXED     = "FIXED_DIRECTIONS";
+constexpr const char* KEY_MARGINE   = "SEARCH_MARGINE";
+constexpr const char* KEY_MARGINE_X = "SEARCH_MARGINE_X";
+constexpr const char* KEY_MARGINE_Y = "SEARCH_MARGINE_Y";
+
+// Reads one optional search margin. An absent key leaves the fraction as
+// it was, which is how ImageDetector later spots the ones it must fill in.
+bool read_margine(
+	const json&        entry,
+	const char*        key,
+	const std::string& where,
+	double&            fraction,
+	std::string&       error)
+{
+	const auto found = entry.find(key);
+	if (entry.end() == found) return true;
+
+	if (!found->is_number()) {
+		error = where + ": " + key + " must be a number";
+		return false;
+	}
+	fraction = found->get<double>();
+	if (fraction < 0.0) {
+		error = where + ": " + key + " must not be negative (got "
+		      + std::to_string(fraction) + ")";
+		return false;
+	}
+	return true;
+}
+
+// Turns the FIXED_DIRECTIONS text into a bit set. Order and case do not
+// matter; anything else is rejected by the caller.
+bool parse_fixed_directions(const std::string& text, unsigned& directions)
+{
+	directions = FIXED_NONE;
+	for (const char c : text) {
+		switch (::toupper(static_cast<unsigned char>(c))) {
+		case 'X': directions |= FIXED_X; break;
+		case 'Y': directions |= FIXED_Y; break;
+		default:  return false;
+		}
+	}
+	return FIXED_NONE != directions;
+}
 
 // Reads a whole file into memory. OpenCV's imread takes a narrow path and
 // mangles anything outside the ANSI code page, so decoding from a buffer
@@ -226,6 +271,29 @@ bool ImageLibrary::load_file(
 			}
 		}
 
+		const auto fixed = entry.find(KEY_FIXED);
+		if (fixed != entry.end()) {
+			if (!fixed->is_string() ||
+				!parse_fixed_directions(
+					fixed->get<std::string>(), pattern.fixed_directions))
+			{
+				error = where + ": " + KEY_FIXED
+				      + " must be \"X\", \"Y\" or \"XY\"; leave it out when "
+				        "the image can turn up anywhere";
+				return false;
+			}
+		}
+
+		if (!read_margine(
+				entry, KEY_MARGINE, where, pattern.search_margine, error) ||
+			!read_margine(
+				entry, KEY_MARGINE_X, where, pattern.search_margine_x, error) ||
+			!read_margine(
+				entry, KEY_MARGINE_Y, where, pattern.search_margine_y, error))
+		{
+			return false;
+		}
+
 		pattern.path = join_path(dir, pattern.file);
 		std::vector<uchar> bytes;
 		if (!read_file_bytes(pattern.path, bytes, error)) {
@@ -257,6 +325,10 @@ bool ImageLibrary::load_file(
 		patterns.push_back(std::move(pattern));
 	}
 
+	{
+		std::lock_guard<std::mutex> lock {m_hits_mutex};
+		m_last_hits.assign(patterns.size(), NEVER_SEEN);
+	}
 	m_patterns  = std::move(patterns);
 	m_index     = std::move(index);
 	m_directory = dir;
@@ -264,10 +336,10 @@ bool ImageLibrary::load_file(
 	return true;
 }
 
-const ImagePattern* ImageLibrary::find(const std::string& name) const
+size_t ImageLibrary::index(const std::string& name) const
 {
 	const auto found = m_index.find(name);
-	return m_index.end() == found ? nullptr : &m_patterns[found->second];
+	return m_index.end() == found ? NOT_FOUND : found->second;
 }
 
 std::string ImageLibrary::name_list() const
@@ -278,4 +350,27 @@ std::string ImageLibrary::name_list() const
 		list += pattern.name;
 	}
 	return list;
+}
+
+cv::Point ImageLibrary::last_hit(size_t image) const
+{
+	std::lock_guard<std::mutex> lock {m_hits_mutex};
+	return m_last_hits[image];
+}
+
+bool ImageLibrary::set_last_hit(size_t image, const cv::Point& corner)
+{
+	std::lock_guard<std::mutex> lock {m_hits_mutex};
+	cv::Point& hit = m_last_hits[image];
+	if (hit == corner) return false;
+	hit = corner;
+	return true;
+}
+
+std::string fixed_directions_text(unsigned directions)
+{
+	std::string text;
+	if (0 != (directions & FIXED_X)) text += 'X';
+	if (0 != (directions & FIXED_Y)) text += 'Y';
+	return text.empty() ? "-" : text;
 }

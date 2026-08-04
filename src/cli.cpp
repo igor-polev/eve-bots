@@ -34,8 +34,15 @@ constexpr const char* HELP_TEXT =
 	"    status            show capture state and frame counter\n"
 	"    dump [file.png]   write the current frame to a PNG file\n"
 	"    images            list the patterns loaded from eve_images.json\n"
-	"    detect <name> [n] search the current frame for a pattern; n is how\n"
-	"                      many matches to report at most, 1 by default\n"
+	"    detect <image> [n] [quick]\n"
+	"                      search the current frame for a pattern, named or\n"
+	"                      numbered as 'images' lists it; matches are\n"
+	"                      reported by their top left corner. n is how many\n"
+	"                      to report at most, 1 by default.\n"
+	"                      A pattern with FIXED_DIRECTIONS that has been\n"
+	"                      found before is looked for near its last position\n"
+	"                      first; 'quick' searches only there and gives up\n"
+	"                      instead of scanning the whole frame\n"
 	"    exit              quit the application\n";
 
 std::vector<std::string> tokenize(const std::string& line)
@@ -68,6 +75,15 @@ std::string certainty_text(double value)
 {
 	std::ostringstream text;
 	text << std::fixed << std::setprecision(3) << value;
+	return text.str();
+}
+
+// "a 302x88 box at 3113,300" - where a search actually looked.
+std::string box_text(const cv::Rect& box)
+{
+	std::ostringstream text;
+	text << "a " << box.width << "x" << box.height
+	     << " box at " << box.x << "," << box.y;
 	return text.str();
 }
 
@@ -318,12 +334,19 @@ void Cli::cmd_images() const
 	}
 	std::cout << "Image library (" << m_images.size()
 	          << (1 == m_images.size() ? " pattern):\n" : " patterns):\n");
-	for (const ImagePattern& pattern : m_images.patterns()) {
-		std::cout << "  " << pattern.name
+	for (size_t image = 0; image < m_images.size(); ++image) {
+		const ImagePattern& pattern = m_images(image);
+		const cv::Point     last    = m_images.last_hit(image);
+		const cv::Point margines = ImageDetector::search_margines(pattern);
+		std::cout << "  [" << image << "] " << pattern.name
 		          << "  " << pattern.width() << "x" << pattern.height()
 		          << (pattern.masked() ? ", alpha mask" : ", opaque")
 		          << ", threshold " << certainty_text(pattern.threshold)
-		          << "\n";
+		          << ", fixed " << fixed_directions_text(pattern.fixed_directions)
+		          << ", margines " << margines.x << "x" << margines.y;
+		if (ImageLibrary::seen(last))
+			std::cout << ", last seen at " << last.x << "," << last.y;
+		std::cout << "\n";
 		if (!pattern.comment.empty())
 			std::cout << "      " << pattern.comment << "\n";
 	}
@@ -332,18 +355,44 @@ void Cli::cmd_images() const
 void Cli::cmd_detect(const std::vector<std::string>& args)
 {
 	if (args.empty()) {
-		std::cout << "Usage: detect <image_name> [count]\n";
+		std::cout << "Usage: detect <image> [count] [quick]\n";
 		cmd_images();
 		return;
 	}
 
-	int max_hits {1};
-	if (args.size() > 1) {
+	// 'images' lists patterns with their index, so take either that or the
+	// name - the same as 'start <n>' after a 'find'.
+	size_t image = ImageLibrary::NOT_FOUND;
+	try {
+		const int typed = std::stoi(args[0]);
+		if (typed >= 0 && static_cast<size_t>(typed) < m_images.size())
+			image = static_cast<size_t>(typed);
+	}
+	catch (const std::exception&) {
+		// not a number, so it must be a name
+	}
+	if (ImageLibrary::NOT_FOUND == image)
+		image = m_images.index(args[0]);
+	if (ImageLibrary::NOT_FOUND == image) {
+		std::cout << "No image called '" << args[0]
+		          << "'; the library holds: " << m_images.name_list() << "\n";
+		return;
+	}
+
+	// 'quick' may sit on either side of the count, so pick it out first and
+	// read whatever is left as the number of matches.
+	int  max_hits {1};
+	bool quick {false};
+	for (size_t i = 1; i < args.size(); ++i) {
+		if ("quick" == to_lower(args[i])) {
+			quick = true;
+			continue;
+		}
 		try {
-			max_hits = std::stoi(args[1]);
+			max_hits = std::stoi(args[i]);
 		}
 		catch (const std::exception&) {
-			std::cout << "Not a number of matches: " << args[1] << "\n";
+			std::cout << "Not a number of matches: " << args[i] << "\n";
 			return;
 		}
 		if (max_hits < 1) {
@@ -352,12 +401,12 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 		}
 	}
 
-	const std::string& name = args[0];
+	const std::string& name = m_images(image).name;
 	const auto started = std::chrono::steady_clock::now();
 
-	std::vector<DetectionHit> hits;
+	Detection found;
 	std::string error;
-	if (!m_detector.detect(name, max_hits, hits, error)) {
+	if (!m_detector.detect(image, max_hits, quick, found, error)) {
 		std::cout << "   [ERROR] " << error << "\n";
 		return;
 	}
@@ -365,16 +414,29 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 		std::chrono::steady_clock::now() - started
 	);
 
-	if (hits.empty()) {
+	std::string where;
+	switch (found.scope) {
+	case SearchScope::BOX:
+		where = ", searched " + box_text(found.box);
+		break;
+	case SearchScope::BOX_THEN_FULL:
+		where = ", " + box_text(found.box) + " missed, searched the whole frame";
+		break;
+	case SearchScope::FULL:
+		where = ", searched the whole frame";
+		break;
+	}
+
+	if (found.hits.empty()) {
 		std::cout << "'" << name << "' not found ("
-		          << spent.count() << " ms).\n";
+		          << spent.count() << " ms" << where << ").\n";
 		return;
 	}
-	std::cout << "'" << name << "' found "
-	          << hits.size() << (1 == hits.size() ? " time (" : " times (")
-	          << spent.count() << " ms):\n";
-	for (const DetectionHit& hit : hits) {
-		std::cout << "  at " << hit.x << "," << hit.y
+	std::cout << "'" << name << "' found " << found.hits.size()
+	          << (1 == found.hits.size() ? " time (" : " times (")
+	          << spent.count() << " ms" << where << "):\n";
+	for (const DetectionHit& hit : found.hits) {
+		std::cout << "  corner " << hit.at.x << "," << hit.at.y
 		          << "  certainty " << certainty_text(hit.certainty) << "\n";
 	}
 }

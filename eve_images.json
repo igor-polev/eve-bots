@@ -1,15 +1,28 @@
 {
     "IMAGES": [
         {
-            "NAME"   : "undock_button",
-            "FILE"   : "undock_button.png",
-            "COMMENT": "Undock button in the station panel, cut from a 3440x1392 client frame"
+            "NAME"            : "undock",
+            "FILE"            : "btn_undock.png",
+            "COMMENT"         : "Undock button in the station panel",
+            "FIXED_DIRECTIONS": "XY"
         },
         {
-            "NAME"     : "undock_button_masked",
-            "FILE"     : "undock_button_masked.png",
-            "COMMENT"  : "Same button with a transparent 10 pixel border - only the opaque middle has to match",
-            "THRESHOLD": 0.9
+            "NAME"            : "shipcore",
+            "FILE"            : "ui_ship_core.png",
+            "COMMENT"         : "Main ship control unit in space",
+            "FIXED_DIRECTIONS": "XY"
+        },
+        {
+            "NAME"            : "gate_route",
+            "FILE"            : "btn_gate_route.png",
+            "COMMENT"         : "Stargate icon in route",
+            "FIXED_DIRECTIONS": "X"
+        },
+        {
+            "NAME"            : "station_route",
+            "FILE"            : "btn_station_route.png",
+            "COMMENT"         : "Stargate icon in route",
+            "FIXED_DIRECTIONS": "X"
         }
     ]
 }
