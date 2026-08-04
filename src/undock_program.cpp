@@ -80,6 +80,31 @@ bool UndockProgram::configure(const ProgramParams& params, std::string& error)
 	return true;
 }
 
+UndockProgram::Look UndockProgram::look_once(
+	ProgramContext&           context,
+	size_t                    image,
+	std::chrono::milliseconds budget,
+	cv::Point&                corner,
+	std::string&              trouble) const
+{
+	if (stopping()) return Look::STOPPED;
+	if (budget <= std::chrono::milliseconds::zero()) return Look::MISSING;
+
+	// The search gets what is left of the budget and no more, so one slow
+	// full frame pass cannot overrun the whole timeout.
+	const Clock::time_point began = Clock::now();
+	Detection found;
+	if (!context.detector.detect(image, 1, false, found, trouble, budget)) {
+		// Running out of the time it was given is not a fault, it is the
+		// answer: the pattern was not there within the budget.
+		return since(began) >= budget ? Look::MISSING : Look::TROUBLE;
+	}
+	if (found.hits.empty()) return Look::MISSING;
+
+	corner = found.hits.front().at;
+	return Look::FOUND;
+}
+
 UndockProgram::Look UndockProgram::look_for(
 	ProgramContext&           context,
 	size_t                    image,
@@ -89,25 +114,15 @@ UndockProgram::Look UndockProgram::look_for(
 {
 	const Clock::time_point deadline = Clock::now() + budget;
 	while (true) {
-		if (stopping()) return Look::STOPPED;
-
 		const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
 			deadline - Clock::now()
 		);
 		if (left <= std::chrono::milliseconds::zero()) return Look::MISSING;
 
-		// The search gets what is left of the budget and no more, so a
-		// single slow full frame pass cannot overrun the whole timeout.
-		Detection found;
-		if (!context.detector.detect(image, 1, false, found, trouble, left)) {
-			// Running out of time is not a fault, it is the answer.
-			if (Clock::now() >= deadline) return Look::MISSING;
-			return Look::TROUBLE;
-		}
-		if (!found.hits.empty()) {
-			corner = found.hits.front().at;
-			return Look::FOUND;
-		}
+		const Look seen = look_once(context, image, left, corner, trouble);
+		// Only "not on screen this time" is worth another attempt.
+		if (Look::MISSING != seen) return seen;
+
 		if (!wait(RETRY_PAUSE)) return Look::STOPPED;
 	}
 }
@@ -130,10 +145,51 @@ ProgramResult UndockProgram::run(ProgramContext& context)
 		        + UNDOCK_IMAGE + "' and '" + SHIPCORE_IMAGE + "'"};
 	}
 
-	// 1. The undock button is what says the ship is still docked.
+	// Everything up to the click shares one deadline, so a client showing
+	// nothing recognisable still gives up on time.
+	const Clock::time_point deadline = started + m_search_timeout;
+	const auto time_left = [deadline] {
+		const auto to_go = std::chrono::duration_cast<std::chrono::milliseconds>(
+			deadline - Clock::now()
+		);
+		return to_go > std::chrono::milliseconds::zero()
+			? to_go : std::chrono::milliseconds::zero();
+	};
+
+	// 1. We are supposed to be docked, so look for the undock button once.
 	cv::Point   corner;
 	std::string trouble;
-	switch (look_for(context, undock, m_search_timeout, corner, trouble)) {
+	Look seen = look_once(context, undock, time_left(), corner, trouble);
+
+	if (Look::MISSING == seen) {
+		// 2. Not there. Far more often that means the ship was never
+		//    docked than that the button is late, and one look at the
+		//    ship core settles it without spending the whole budget
+		//    retrying a button that is never going to appear.
+		cv::Point core;
+		switch (look_once(context, shipcore, time_left(), core, trouble)) {
+		case Look::FOUND:
+			return {ProgramExit::SUCCESS,
+			        "already in space after " + seconds_text(since(started))
+			        + ": no undock button, ship core at " + point_text(core)};
+		case Look::STOPPED:
+			return {ProgramExit::STOPPED,
+			        "stopped while checking whether the ship was already "
+			        "in space"};
+		case Look::TROUBLE:
+			return {ProgramExit::FAILURE,
+			        "no undock button, and cannot look for the ship core: "
+			        + trouble};
+		default:
+			break;
+		}
+
+		// 3. Neither pattern is on screen. Now late drawing is the likely
+		//    explanation, so go back to the button and keep trying.
+		seen = look_for(context, undock, time_left(), corner, trouble);
+	}
+
+	switch (seen) {
 	case Look::STOPPED:
 		return {ProgramExit::STOPPED,
 		        "stopped while looking for the undock button"};
@@ -142,8 +198,10 @@ ProgramResult UndockProgram::run(ProgramContext& context)
 		        "cannot look for the undock button: " + trouble};
 	case Look::MISSING:
 		return {ProgramExit::FAILURE,
-		        "no undock button within " + seconds_text(m_search_timeout)
-		        + " - is the ship already in space?"};
+		        "neither the undock button nor the ship core within "
+		        + seconds_text(m_search_timeout)
+		        + " - is the client on a loading screen, or are the "
+		          "patterns cut at a different resolution?"};
 	default:
 		break;
 	}

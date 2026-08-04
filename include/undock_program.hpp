@@ -8,9 +8,23 @@
 	core the evidence that it is not: neither can be seen from the other
 	side, so finding one and then the other is a complete undock.
 
-	Both steps retry, because neither is instant. The button may still be
-	drawing when the program starts, and undocking itself takes seconds of
-	animation during which nothing recognisable is on screen.
+	No undock button is not a failure by itself - far more often it means
+	the ship was never docked. So the first pass is one look at each: the
+	button, and then the ship core, which answers "are we already out?"
+	immediately instead of spending the whole budget retrying a button
+	that is never going to appear. That makes running this program a way
+	of asking for the ship to be in space rather than for a button to be
+	pressed.
+
+	Only when neither shows up on that first pass is retrying worthwhile,
+	because then the likely cause is the interface still catching up.
+	Retries go back to the button alone, until it appears or the search
+	budget is gone. Waiting for space after the click retries too, since
+	undocking takes seconds of animation during which nothing
+	recognisable is on screen.
+
+	Everything before the click shares one SEARCH_TIMEOUT deadline, so a
+	client showing neither pattern still gives up on time.
 */
 
 #pragma once
@@ -45,7 +59,17 @@ private:
 	// What looking for one pattern ended in.
 	enum class Look { FOUND, MISSING, STOPPED, TROUBLE };
 
-	// Searches for a pattern until it turns up or the budget runs out.
+	// One search and no more. MISSING means it was not on screen this
+	// time, which is an answer rather than a fault.
+	Look look_once(
+		ProgramContext&           context,
+		size_t                    image,
+		std::chrono::milliseconds budget,
+		cv::Point&                corner,
+		std::string&              trouble
+	) const;
+
+	// Repeats look_once until the pattern turns up or the budget runs out.
 	Look look_for(
 		ProgramContext&           context,
 		size_t                    image,
