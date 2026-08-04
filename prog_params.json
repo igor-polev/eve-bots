@@ -1,0 +1,10 @@
+{
+    "PROGRAMS": [
+        {
+            "NAME"          : "undock",
+            "COMMENT"       : "Timeouts are in milliseconds. SEARCH_TIMEOUT covers looking for the undock button, UNDOCK_TIMEOUT runs from the click until the ship core confirms the ship is in space.",
+            "SEARCH_TIMEOUT": 15000,
+            "UNDOCK_TIMEOUT": 45000
+        }
+    ]
+}

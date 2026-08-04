@@ -19,6 +19,9 @@ add_executable(${PROJECT_NAME}
     src/image_library.cpp
     src/image_detector.cpp
     src/mouse_input.cpp
+    src/program_params.cpp
+    src/program.cpp
+    src/undock_program.cpp
 )
 target_include_directories(${PROJECT_NAME} PRIVATE include)
 

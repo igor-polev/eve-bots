@@ -16,6 +16,7 @@
 #include "cli.hpp"
 #include "png_writer.hpp"
 #include "text_util.hpp"
+#include "undock_program.hpp"
 
 namespace {
 
@@ -47,6 +48,11 @@ constexpr const char* HELP_TEXT =
 	"    click <x> <y> [options]\n"
 	"                      click the middle of a pattern, or a bare point in\n"
 	"                      frame coordinates; see 'click' with no arguments\n"
+	"    programs          list the programs and the parameters they will use\n"
+	"    run <program>     start a program on its own thread; the console\n"
+	"                      stays usable and the outcome is printed when it\n"
+	"                      finishes\n"
+	"    abort             ask the running program to stop early\n"
 	"    exit              quit the application\n";
 
 constexpr const char* CLICK_USAGE =
@@ -165,6 +171,10 @@ int Cli::run()
 		std::cout << " [WARNING] Image detection is unavailable: "
 		          << error << "\n";
 	}
+	if (!load_programs()) {
+		m_detector.stop();
+		return -1;
+	}
 	std::cout << "Type 'help' for a list of commands.\n\n";
 
 	std::string line;
@@ -177,6 +187,14 @@ int Cli::run()
 		}
 		if (!dispatch(line)) break;
 	}
+	// A program still working would keep using the detector and the
+	// capture we are about to shut down.
+	if (m_programs.running()) {
+		std::cout << "Waiting for '" << m_programs.current()
+		          << "' to stop...\n";
+		m_programs.abort();
+	}
+	m_programs.wait();
 	m_detector.stop();
 	m_capture.stop();
 	return 0;
@@ -210,6 +228,12 @@ bool Cli::dispatch(const std::string& line)
 		cmd_detect(args);
 	else if ("click" == command)
 		cmd_click(args);
+	else if ("programs" == command)
+		cmd_programs();
+	else if ("run" == command)
+		cmd_run(args);
+	else if ("abort" == command)
+		cmd_abort();
 	else
 		std::cout << "Unknown command: " << tokens[0]
 		          << " (type 'help')\n";
@@ -485,6 +509,110 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 		std::cout << "  corner " << hit.at.x << "," << hit.at.y
 		          << "  certainty " << certainty_text(hit.certainty) << "\n";
 	}
+}
+
+bool Cli::load_programs()
+{
+	m_programs.add(std::make_unique<UndockProgram>());
+
+	std::string error;
+	if (!m_programs.configure(m_params, error)) {
+		std::cout << "   [ERROR] " << error << "\n";
+		return false;
+	}
+	m_programs.on_finish(
+		[this](const std::string& name, const ProgramResult& result) {
+			report_program(name, result);
+		}
+	);
+	return true;
+}
+
+void Cli::report_program(const std::string& name, const ProgramResult& result)
+{
+	// This runs on the program thread, so the console is most likely
+	// sitting at a prompt: start on a fresh line and put the prompt back.
+	std::cout << "\n[" << name << "] "
+	          << program_exit_text(result.exit) << ": "
+	          << result.description << "\n"
+	          << "eve> " << std::flush;
+}
+
+void Cli::cmd_programs() const
+{
+	if (m_programs.empty()) {
+		std::cout << "No programs are registered.\n";
+		return;
+	}
+	std::cout << "Programs (" << m_programs.size() << "):\n";
+	for (size_t i = 0; i < m_programs.size(); ++i) {
+		const Program& program = m_programs(i);
+		std::cout << "  [" << i << "] " << program.name()
+		          << "  " << program.purpose() << "\n"
+		          << "      " << program.settings_text() << "\n";
+	}
+	std::cout << "Parameters: "
+	          << (m_params.loaded()
+	                 ? to_utf8(m_params.source_path())
+	                 : std::string("none loaded, using built in defaults"))
+	          << "\n";
+	if (m_programs.running())
+		std::cout << "Running: " << m_programs.current() << "\n";
+}
+
+void Cli::cmd_run(const std::vector<std::string>& args)
+{
+	if (args.empty()) {
+		std::cout << "Usage: run <program>\n";
+		cmd_programs();
+		return;
+	}
+	// The name is checked before the runner is, so that a typo is reported
+	// as a typo rather than as whatever else happens to be going on.
+	// Same addressing as images: a name, or the index 'programs' prints.
+	size_t program = ProgramRunner::NOT_FOUND;
+	int    typed {0};
+	if (parse_int(args[0], typed)) {
+		if (typed < 0 || static_cast<size_t>(typed) >= m_programs.size()) {
+			std::cout << "No program with index " << args[0] << "\n";
+			return;
+		}
+		program = static_cast<size_t>(typed);
+	} else {
+		program = m_programs.index(args[0]);
+		if (ProgramRunner::NOT_FOUND == program) {
+			std::cout << "No program called '" << args[0] << "'; there is: "
+			          << m_programs.name_list() << "\n";
+			return;
+		}
+	}
+
+	if (m_programs.running()) {
+		std::cout << "'" << m_programs.current()
+		          << "' is already running; use 'abort' first.\n";
+		return;
+	}
+
+	const ProgramContext context {m_images, m_detector, m_capture};
+	std::string error;
+	if (!m_programs.start(program, context, error)) {
+		std::cout << "   [ERROR] " << error << "\n";
+		return;
+	}
+	std::cout << "Started '" << m_programs(program).name()
+	          << "'; it will report when it finishes ('abort' stops it).\n";
+}
+
+void Cli::cmd_abort()
+{
+	if (!m_programs.running()) {
+		std::cout << "No program is running.\n";
+		return;
+	}
+	const std::string name = m_programs.current();
+	m_programs.abort();
+	std::cout << "Asked '" << name
+	          << "' to stop; it will finish the step it is on.\n";
 }
 
 void Cli::cmd_click(const std::vector<std::string>& args)

@@ -14,7 +14,9 @@
 
 #include "cli.hpp"
 #include "image_library.hpp"
+#include "program_params.hpp"
 #include "settings.hpp"
+#include "text_util.hpp"
 
 int main()
 {
@@ -50,7 +52,20 @@ int main()
 			return -1;
 		}
 
-		Cli cli {settings, images};
+		// Programs carry their own defaults, so this file only overrides
+		// them: missing is a note, broken is fatal.
+		ProgramParams params;
+		if (!params.load(error)) {
+			std::cerr << "   [ERROR] " << error << std::endl;
+			return -1;
+		}
+		if (!params.loaded()) {
+			std::cout << " [WARNING] " << to_utf8(ProgramParams::FILE_NAME)
+			          << " not found; programs will use their built in "
+			             "defaults.\n";
+		}
+
+		Cli cli {settings, images, params};
 		return cli.run();
 	}
 	catch (const winrt::hresult_error& e) {
