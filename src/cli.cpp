@@ -43,7 +43,29 @@ constexpr const char* HELP_TEXT =
 	"                      found before is looked for near its last position\n"
 	"                      first; 'quick' searches only there and gives up\n"
 	"                      instead of scanning the whole frame\n"
+	"    click <image> [options]\n"
+	"    click <x> <y> [options]\n"
+	"                      click the middle of a pattern, or a bare point in\n"
+	"                      frame coordinates; see 'click' with no arguments\n"
 	"    exit              quit the application\n";
+
+constexpr const char* CLICK_USAGE =
+	"Usage: click <image> [options]     the middle of a detected pattern\n"
+	"       click <x> <y> [options]     a point, in capture frame pixels\n"
+	"Options:\n"
+	"    auto        SendInput while the window is active, PostMessage when\n"
+	"                it is not - the default\n"
+	"    send        always SendInput: system wide, moves the real cursor,\n"
+	"                only reaches the foreground window\n"
+	"    post        always PostMessage: reaches a background window and\n"
+	"                leaves the cursor alone, if the game listens for it\n"
+	"    find        search for the pattern when none has been detected yet\n"
+	"                (the default); nofind fails instead\n"
+	"    refresh     search again even though a position is remembered;\n"
+	"                norefresh reuses it (the default)\n"
+	"    wait_ms=<n> sleep after the click so the game can react, "
+	                 "20 by default\n"
+	"'find' and 'refresh' do not apply to clicking a bare point.\n";
 
 std::vector<std::string> tokenize(const std::string& line)
 {
@@ -67,6 +89,22 @@ std::string to_lower(std::string text)
 		[](unsigned char c) { return static_cast<char>(::tolower(c)); }
 	);
 	return text;
+}
+
+// Whole-token integer: "12ab" is not a number, so a mistyped option cannot
+// be silently taken for one.
+bool parse_int(const std::string& text, int& value)
+{
+	try {
+		size_t used {0};
+		const int parsed = std::stoi(text, &used);
+		if (used != text.size()) return false;
+		value = parsed;
+		return true;
+	}
+	catch (const std::exception&) {
+		return false;
+	}
 }
 
 // Certainties are only meaningful to two or three digits, and formatting
@@ -170,6 +208,8 @@ bool Cli::dispatch(const std::string& line)
 		cmd_images();
 	else if ("detect" == command)
 		cmd_detect(args);
+	else if ("click" == command)
+		cmd_click(args);
 	else
 		std::cout << "Unknown command: " << tokens[0]
 		          << " (type 'help')\n";
@@ -352,6 +392,28 @@ void Cli::cmd_images() const
 	}
 }
 
+size_t Cli::resolve_image(const std::string& token) const
+{
+	// 'images' lists patterns with their index, so take either that or the
+	// name - the same as 'start <n>' after a 'find'.
+	int typed {0};
+	if (parse_int(token, typed)) {
+		if (typed >= 0 && static_cast<size_t>(typed) < m_images.size())
+			return static_cast<size_t>(typed);
+		std::cout << "No image with index " << token
+		          << "; the library holds " << m_images.size()
+		          << (1 == m_images.size() ? " pattern.\n" : " patterns.\n");
+		return ImageLibrary::NOT_FOUND;
+	}
+
+	const size_t image = m_images.index(token);
+	if (ImageLibrary::NOT_FOUND == image) {
+		std::cout << "No image called '" << token
+		          << "'; the library holds: " << m_images.name_list() << "\n";
+	}
+	return image;
+}
+
 void Cli::cmd_detect(const std::vector<std::string>& args)
 {
 	if (args.empty()) {
@@ -360,24 +422,8 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 		return;
 	}
 
-	// 'images' lists patterns with their index, so take either that or the
-	// name - the same as 'start <n>' after a 'find'.
-	size_t image = ImageLibrary::NOT_FOUND;
-	try {
-		const int typed = std::stoi(args[0]);
-		if (typed >= 0 && static_cast<size_t>(typed) < m_images.size())
-			image = static_cast<size_t>(typed);
-	}
-	catch (const std::exception&) {
-		// not a number, so it must be a name
-	}
-	if (ImageLibrary::NOT_FOUND == image)
-		image = m_images.index(args[0]);
-	if (ImageLibrary::NOT_FOUND == image) {
-		std::cout << "No image called '" << args[0]
-		          << "'; the library holds: " << m_images.name_list() << "\n";
-		return;
-	}
+	const size_t image = resolve_image(args[0]);
+	if (ImageLibrary::NOT_FOUND == image) return;
 
 	// 'quick' may sit on either side of the count, so pick it out first and
 	// read whatever is left as the number of matches.
@@ -439,4 +485,113 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 		std::cout << "  corner " << hit.at.x << "," << hit.at.y
 		          << "  certainty " << certainty_text(hit.certainty) << "\n";
 	}
+}
+
+void Cli::cmd_click(const std::vector<std::string>& args)
+{
+	if (args.empty()) {
+		std::cout << CLICK_USAGE;
+		return;
+	}
+
+	// Two numbers in a row mean a bare point; anything else names an image.
+	// A single number is an image index, so 'click 1' and 'click 1 2' do
+	// different things - deliberately, since both readings are useful.
+	int    x {0}, y {0};
+	bool   point {false};
+	size_t first_option {1};
+	if (args.size() > 1 && parse_int(args[0], x) && parse_int(args[1], y)) {
+		point        = true;
+		first_option = 2;
+	}
+
+	ClickMethod method  {ClickMethod::AUTO};
+	bool        find    {true};
+	bool        refresh {false};
+	int         wait_ms {UI_WAIT_DEFAULT};
+	bool        chosen  {false};   // find or refresh named explicitly
+
+	for (size_t i = first_option; i < args.size(); ++i) {
+		const std::string option = to_lower(args[i]);
+		if      ("auto"    == option) method  = ClickMethod::AUTO;
+		else if ("send"    == option) method  = ClickMethod::SEND;
+		else if ("post"    == option) method  = ClickMethod::POST;
+		else if ("find"    == option) { find    = true;  chosen = true; }
+		else if ("nofind"  == option) { find    = false; chosen = true; }
+		else if ("refresh" == option) { refresh = true;  chosen = true; }
+		else if ("norefresh" == option) { refresh = false; chosen = true; }
+		else if (0 == option.compare(0, 8, "wait_ms=")) {
+			if (!parse_int(option.substr(8), wait_ms) || wait_ms < 0) {
+				std::cout << "Not a wait in milliseconds: " << args[i] << "\n";
+				return;
+			}
+		} else {
+			std::cout << "Unknown click option: " << args[i] << "\n"
+			          << CLICK_USAGE;
+			return;
+		}
+	}
+
+	if (point && chosen) {
+		std::cout << "'find' and 'refresh' only apply to clicking an image.\n";
+		return;
+	}
+	if (!m_capture.running()) {
+		std::cout << "Capture is not running; use 'start' first.\n";
+		return;
+	}
+
+	cv::Point   target {x, y};
+	std::string what;
+	if (!point) {
+		const size_t image = resolve_image(args[0]);
+		if (ImageLibrary::NOT_FOUND == image) return;
+
+		const ImagePattern& pattern = m_images(image);
+		cv::Point           corner  = m_images.last_hit(image);
+
+		// 'refresh' asks for a search outright; without it one happens only
+		// when there is nothing remembered to click.
+		if (refresh || !ImageLibrary::seen(corner)) {
+			if (!find && !refresh) {
+				std::cout << "'" << pattern.name << "' has not been detected "
+				             "yet; run 'detect' first, or drop 'nofind'.\n";
+				return;
+			}
+			Detection found;
+			std::string error;
+			if (!m_detector.detect(image, 1, false, found, error)) {
+				std::cout << "   [ERROR] " << error << "\n";
+				return;
+			}
+			if (found.hits.empty()) {
+				std::cout << "'" << pattern.name
+				          << "' not found, nothing to click.\n";
+				return;
+			}
+			corner = found.hits.front().at;
+		}
+		// the corner is where the pattern starts, the middle is what a
+		// person would aim at
+		target = corner
+		       + cv::Point {pattern.width() / 2, pattern.height() / 2};
+		what   = "'" + pattern.name + "' at ";
+	}
+
+	ClickResult result;
+	std::string error;
+	if (!click_at(m_capture.target(), target, method, wait_ms, result, error)) {
+		std::cout << "   [ERROR] " << error << "\n";
+		return;
+	}
+
+	const bool posted = ClickMethod::POST == result.method;
+	const cv::Point& landed = posted ? result.client : result.screen;
+	std::cout << "Clicked " << what
+	          << "frame " << result.frame.x << "," << result.frame.y
+	          << " -> " << (posted ? "client " : "screen ")
+	          << landed.x << "," << landed.y
+	          << " (" << click_method_text(result.method) << ")";
+	if (wait_ms > 0) std::cout << ", waited " << wait_ms << " ms";
+	std::cout << "\n";
 }

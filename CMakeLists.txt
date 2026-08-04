@@ -18,6 +18,7 @@ add_executable(${PROJECT_NAME}
     src/png_writer.cpp
     src/image_library.cpp
     src/image_detector.cpp
+    src/mouse_input.cpp
 )
 target_include_directories(${PROJECT_NAME} PRIVATE include)
 
@@ -29,7 +30,8 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 )
 
 # WindowsApp - C++/WinRT (Windows Graphics Capture)
-# d3d11, dxgi - capture surfaces;  windowscodecs - PNG;  dwmapi - cloak check
+# d3d11, dxgi - capture surfaces;  windowscodecs - PNG
+# dwmapi - cloak check, and the frame bounds a click is aimed with
 target_link_libraries(${PROJECT_NAME} PRIVATE
     nlohmann_json::nlohmann_json
     opencv_core

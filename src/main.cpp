@@ -20,6 +20,10 @@ int main()
 {
 	// window titles are printed as UTF-8
 	SetConsoleOutputCP(CP_UTF8);
+	// Clicks are aimed using window geometry, and Windows silently scales
+	// every such measurement for a process that has not said it understands
+	// DPI. On a display at anything but 100% the coordinates would be off.
+	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 	// OpenCV reports every optional parallel backend it fails to load the
 	// first time it is used; the console is our user interface, keep it quiet
 	cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_WARNING);

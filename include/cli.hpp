@@ -11,6 +11,7 @@
 
 #include "image_detector.hpp"
 #include "image_library.hpp"
+#include "mouse_input.hpp"
 #include "screen_capture.hpp"
 #include "settings.hpp"
 #include "window_finder.hpp"
@@ -35,8 +36,13 @@ private:
 	void cmd_status() const;
 	void cmd_images() const;
 	void cmd_detect(const std::vector<std::string>& args);
+	void cmd_click(const std::vector<std::string>& args);
 
 	void print_windows() const;
+	// Turns a command line token into a library position, taking either a
+	// name or the index 'images' prints. NOT_FOUND when it is neither, the
+	// complaint having already been printed.
+	size_t resolve_image(const std::string& token) const;
 
 	const Settings& m_settings;
 	ImageLibrary&   m_images;
