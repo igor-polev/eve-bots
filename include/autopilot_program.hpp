@@ -53,14 +53,14 @@ public:
 	static constexpr const char* KEY_DOCKING_PAUSE       = "DOCKING_PAUSE";
 	static constexpr const char* KEY_DOCKING_TIMEOUT     = "DOCKING_TIMEOUT";
 
-	static constexpr int DESTINATION_TIMEOUT_DEFAULT =  30000;   // ms
-	static constexpr int CMD_SEARCH_TIMEOUT_DEFAULT  =  15000;
+	static constexpr int DESTINATION_TIMEOUT_DEFAULT =  10000;   // ms
+	static constexpr int CMD_SEARCH_TIMEOUT_DEFAULT  =   5000;
 	static constexpr int ENTER_WARP_TIMEOUT_DEFAULT  =  30000;
 	static constexpr int WARP_RECHECK_PAUSE_DEFAULT  =   2000;
 	static constexpr int MAX_JUMP_TIMEOUT_DEFAULT    = 300000;
 	static constexpr int GATE_JUMP_PAUSE_DEFAULT     =  15000;
 	static constexpr int DOCKING_PAUSE_DEFAULT       =  20000;
-	static constexpr int DOCKING_TIMEOUT_DEFAULT     =  60000;
+	static constexpr int DOCKING_TIMEOUT_DEFAULT     =  40000;
 
 	AutopilotProgram() : Program("autopilot") {}
 

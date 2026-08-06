@@ -77,20 +77,17 @@ std::string window_name(HWND window)
 	return "'" + name + "'";
 }
 
-// Brings a window to the front and waits until it really is there.
-bool bring_to_front(HWND window, bool& activated, std::string& error)
+// Asks for a window to be brought forward. Does not wait for it.
+//
+// Windows only lets the process that already owns the foreground, or that
+// supplied the last input, hand it to somebody else; everyone else just
+// gets a flashing taskbar button. Attaching our input queue to the
+// foreground window's thread makes Windows treat the two as one thread,
+// which is the documented way past that rule.
+void raise_window(HWND window)
 {
-	activated = false;
-	if (GetForegroundWindow() == window) return true;
-
-	activated = true;
 	if (IsIconic(window)) ShowWindow(window, SW_RESTORE);
 
-	// Windows only lets the process that already owns the foreground, or
-	// that supplied the last input, hand it to somebody else; everyone
-	// else just gets a flashing taskbar button. Attaching our input queue
-	// to the foreground window's thread makes Windows treat the two as
-	// one thread, which is the documented way past that rule.
 	const HWND  front  = GetForegroundWindow();
 	const DWORD ours   = GetCurrentThreadId();
 	const DWORD theirs = front ? GetWindowThreadProcessId(front, nullptr) : 0;
@@ -101,6 +98,46 @@ bool bring_to_front(HWND window, bool& activated, std::string& error)
 	BringWindowToTop(window);
 
 	if (shared) AttachThreadInput(ours, theirs, FALSE);
+}
+
+// Puts the desktop back the way it was found - the cursor where it was and
+// the focus on whatever held it - however click_at() ends. A destructor
+// rather than a call at the end, so a click refused after the game was
+// raised does not walk off with the focus it took.
+class Desktop {
+public:
+	Desktop(const POINT& cursor, HWND front, bool* restored)
+		: m_cursor {cursor}, m_front {front}, m_restored {restored} {}
+	Desktop(const Desktop&)            = delete;
+	Desktop& operator=(const Desktop&) = delete;
+
+	~Desktop()
+	{
+		SetCursorPos(m_cursor.x, m_cursor.y);
+
+		// Nothing to give back if the game already had the focus, or if
+		// whatever held it has since closed.
+		if (!m_front || !IsWindow(m_front)) return;
+		if (GetForegroundWindow() == m_front) return;
+
+		raise_window(m_front);
+		if (m_restored) *m_restored = true;
+	}
+
+private:
+	POINT m_cursor {};
+	HWND  m_front {nullptr};
+	bool* m_restored {nullptr};
+};
+
+// Brings a window to the front and waits until it really is there.
+bool bring_to_front(HWND window, bool& activated, std::string& error)
+{
+	activated = false;
+	if (GetForegroundWindow() == window) return true;
+
+	activated = true;
+	raise_window(window);
 
 	for (std::chrono::milliseconds waited {0};
 	     waited < FOCUS_TIMEOUT;
@@ -129,6 +166,11 @@ bool click_at(
 	ClickResult&     result,
 	std::string&     error)
 {
+	// Taken before anything is disturbed, so it can all be put back.
+	POINT cursor_was {};
+	GetCursorPos(&cursor_was);
+	const HWND front_was = GetForegroundWindow();
+
 	if (!window || !IsWindow(window)) {
 		error = "the captured window is gone";
 		return false;
@@ -148,6 +190,9 @@ bool click_at(
 	result = ClickResult {};
 	result.frame = frame;
 	if (!map_point(window, frame, result.screen, error)) return false;
+
+	// From here on the desktop gets disturbed, so arm the undo first.
+	const Desktop desktop {cursor_was, front_was, &result.restored};
 
 	// Before anything else, because an inactive window eats the click that
 	// activates it, and because this changes what is on top at the point

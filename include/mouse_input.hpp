@@ -26,9 +26,13 @@
 	effect before it presses anything, and gives up rather than clicking
 	into a window that would only eat it.
 
-	Bringing the game forward is not optional and it does take the focus
-	away from whatever else is running. With PostMessage gone there is no
-	way to click a background window at all.
+	Bringing the game forward is not optional - with PostMessage gone there
+	is no way to click a background window at all - but it is temporary.
+	The cursor position and the window that held the focus are noted before
+	anything moves and put back once the click is done, so a program
+	clicking away in the background costs the desktop a flicker rather than
+	the use of it. That restoring happens however click_at() ends, so a
+	click refused after the game was raised does not keep the focus either.
 
 	The other cost of SendInput is that the click lands wherever the cursor
 	is put, on whichever window is on top there. Capture keeps working when
@@ -52,12 +56,13 @@ struct ClickResult {
 	cv::Point frame;    // the point asked for, in capture frame pixels
 	cv::Point screen;   // the same point on the desktop
 	bool activated {false};   // the window had to be brought to the front
+	bool restored  {false};   // the focus was handed back afterwards
 };
 
 // Clicks one point of window, given in capture frame coordinates, then
 // sleeps wait_ms so the game can react before the next frame is examined.
-// Brings the window to the front first; see the note above for why that
-// is not optional.
+// Brings the window to the front first and puts the cursor and the focus
+// back afterwards; see the note above for why that is not optional.
 // Returns false and fills error when the point cannot be mapped onto the
 // desktop, the window will not come forward, something else is covering
 // the point, or the input is refused.

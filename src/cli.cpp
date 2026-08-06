@@ -712,7 +712,8 @@ void Cli::cmd_click(const std::vector<std::string>& args)
 	std::cout << "Clicked " << what
 	          << "frame " << result.frame.x << "," << result.frame.y
 	          << " -> screen " << result.screen.x << "," << result.screen.y;
-	if (result.activated) std::cout << ", raised the window first";
+	if (result.activated) std::cout << ", raised the window";
+	if (result.restored)  std::cout << ", put the focus back";
 	if (wait_ms > 0)      std::cout << ", waited " << wait_ms << " ms";
 	std::cout << "\n";
 }

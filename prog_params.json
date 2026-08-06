@@ -9,14 +9,14 @@
         {
             "NAME"               : "autopilot",
             "COMMENT"            : "All values are milliseconds. DESTINATION_TIMEOUT waits for a gate or station icon in the route panel; CMD_SEARCH_TIMEOUT for the jump or dock button that selecting it brings up; ENTER_WARP_TIMEOUT for the warp message to appear after the command; MAX_JUMP_TIMEOUT for it to go away again, which is the whole warp; WARP_RECHECK_PAUSE is the gap between those checks. GATE_JUMP_PAUSE and DOCKING_PAUSE let the session change or the docking animation finish, and DOCKING_TIMEOUT waits for the undock button that proves the ship is inside.",
-            "DESTINATION_TIMEOUT": 30000,
-            "CMD_SEARCH_TIMEOUT" : 15000,
+            "DESTINATION_TIMEOUT": 10000,
+            "CMD_SEARCH_TIMEOUT" : 5000,
             "ENTER_WARP_TIMEOUT" : 30000,
             "WARP_RECHECK_PAUSE" : 2000,
             "MAX_JUMP_TIMEOUT"   : 300000,
             "GATE_JUMP_PAUSE"    : 15000,
             "DOCKING_PAUSE"      : 20000,
-            "DOCKING_TIMEOUT"    : 60000
+            "DOCKING_TIMEOUT"    : 40000
         }
     ]
 }

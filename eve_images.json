@@ -39,7 +39,7 @@
         {
             "NAME"            : "station_route",
             "FILE"            : "btn_station_route.png",
-            "COMMENT"         : "Stargate icon in route",
+            "COMMENT"         : "Station icon in route",
             "FIXED_DIRECTIONS": "X"
         }
     ]
