@@ -32,14 +32,28 @@
         },
         {
             "NAME"            : "gate_route",
-            "FILE"            : "btn_gate_route.png",
+            "FILE"            : "icn_gate_route.png",
             "COMMENT"         : "Stargate icon in route",
+            "FIXED_DIRECTIONS": "X",
+            "SIMILAR"         : [ "gate" ]
+        },
+        {
+            "NAME"            : "gate",
+            "FILE"            : "icn_gate.png",
+            "COMMENT"         : "Stargate icon",
             "FIXED_DIRECTIONS": "X"
         },
         {
             "NAME"            : "station_route",
-            "FILE"            : "btn_station_route.png",
+            "FILE"            : "icn_station_route.png",
             "COMMENT"         : "Station icon in route",
+            "FIXED_DIRECTIONS": "X",
+            "SIMILAR"         : [ "station" ]
+        },
+        {
+            "NAME"            : "station",
+            "FILE"            : "icn_station.png",
+            "COMMENT"         : "Station icon",
             "FIXED_DIRECTIONS": "X"
         }
     ]

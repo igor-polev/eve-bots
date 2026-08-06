@@ -165,6 +165,7 @@ int Cli::run()
 	}
 
 	std::string error;
+	m_detector.set_min_margine(m_settings.min_margine());
 	if (!m_detector.start(m_images, m_capture, error)) {
 		std::cout << " [WARNING] Image detection is unavailable: "
 		          << error << "\n";
@@ -399,7 +400,7 @@ void Cli::cmd_images() const
 	for (size_t image = 0; image < m_images.size(); ++image) {
 		const ImagePattern& pattern = m_images(image);
 		const cv::Point     last    = m_images.last_hit(image);
-		const cv::Point margines = ImageDetector::search_margines(pattern);
+		const cv::Point margines = m_detector.search_margines(pattern);
 		std::cout << "  [" << image << "] " << pattern.name
 		          << "  " << pattern.width() << "x" << pattern.height()
 		          << (pattern.masked() ? ", alpha mask" : ", opaque")
@@ -409,6 +410,12 @@ void Cli::cmd_images() const
 		if (ImageLibrary::seen(last))
 			std::cout << ", last seen at " << last.x << "," << last.y;
 		std::cout << "\n";
+		if (!pattern.similar.empty()) {
+			std::cout << "      similar to";
+			for (const size_t twin : pattern.similar)
+				std::cout << " " << m_images(twin).name;
+			std::cout << "\n";
+		}
 		if (!pattern.comment.empty())
 			std::cout << "      " << pattern.comment << "\n";
 	}
@@ -495,17 +502,29 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 		break;
 	}
 
+	// Candidates that a lookalike explained better are worth saying out
+	// loud: they are the difference between "not there" and "not seen".
+	std::string mistaken;
+	if (found.mistaken > 0) {
+		mistaken = ", " + std::to_string(found.mistaken)
+		         + (1 == found.mistaken ? " candidate was" : " candidates were")
+		         + " something similar";
+	}
+
 	if (found.hits.empty()) {
 		std::cout << "'" << name << "' not found ("
-		          << spent.count() << " ms" << where << ").\n";
+		          << spent.count() << " ms" << where << mistaken << ").\n";
 		return;
 	}
 	std::cout << "'" << name << "' found " << found.hits.size()
 	          << (1 == found.hits.size() ? " time (" : " times (")
-	          << spent.count() << " ms" << where << "):\n";
+	          << spent.count() << " ms" << where << mistaken << "):\n";
 	for (const DetectionHit& hit : found.hits) {
 		std::cout << "  corner " << hit.at.x << "," << hit.at.y
-		          << "  certainty " << certainty_text(hit.certainty) << "\n";
+		          << "  certainty " << certainty_text(hit.certainty);
+		if (!m_images(image).similar.empty())
+			std::cout << "  fit " << certainty_text(hit.fit);
+		std::cout << "\n";
 	}
 }
 

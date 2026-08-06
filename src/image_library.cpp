@@ -5,7 +5,9 @@
 	ImageLibrary implementation.
 */
 
+#include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
 
 #include <nlohmann/json.hpp>
@@ -29,6 +31,7 @@ constexpr const char* KEY_FIXED     = "FIXED_DIRECTIONS";
 constexpr const char* KEY_MARGINE   = "SEARCH_MARGINE";
 constexpr const char* KEY_MARGINE_X = "SEARCH_MARGINE_X";
 constexpr const char* KEY_MARGINE_Y = "SEARCH_MARGINE_Y";
+constexpr const char* KEY_SIMILAR   = "SIMILAR";
 
 // Reads one optional search margin. An absent key leaves the fraction as
 // it was, which is how ImageDetector later spots the ones it must fill in.
@@ -204,6 +207,10 @@ bool ImageLibrary::load_file(
 
 	std::vector<ImagePattern>     patterns;
 	std::map<std::string, size_t> index;
+	// SIMILAR entries as written, one list per pattern, in step with
+	// patterns; turned into positions once every name is known.
+	std::vector<std::vector<std::string>> named;
+	m_warnings.clear();
 	patterns.reserve(images->size());
 
 	for (size_t i = 0; i < images->size(); ++i) {
@@ -294,6 +301,27 @@ bool ImageLibrary::load_file(
 			return false;
 		}
 
+		// Kept as names for now: a pattern may name one that has not been
+		// read yet, so they can only become positions once all are in.
+		std::vector<std::string> similar;
+		const auto listed = entry.find(KEY_SIMILAR);
+		if (listed != entry.end()) {
+			if (!listed->is_array()) {
+				error = where + ": " + KEY_SIMILAR
+				      + " must be a list of image names";
+				return false;
+			}
+			for (const json& other : *listed) {
+				if (!other.is_string()) {
+					error = where + ": every name in " + KEY_SIMILAR
+					      + " must be a string";
+					return false;
+				}
+				similar.push_back(other.get<std::string>());
+			}
+		}
+		named.push_back(std::move(similar));
+
 		pattern.path = join_path(dir, pattern.file);
 		std::vector<uchar> bytes;
 		if (!read_file_bytes(pattern.path, bytes, error)) {
@@ -325,6 +353,8 @@ bool ImageLibrary::load_file(
 		patterns.push_back(std::move(pattern));
 	}
 
+	if (!link_similar(patterns, index, named, path, error)) return false;
+
 	{
 		std::lock_guard<std::mutex> lock {m_hits_mutex};
 		m_last_hits.assign(patterns.size(), NEVER_SEEN);
@@ -333,6 +363,84 @@ bool ImageLibrary::load_file(
 	m_index     = std::move(index);
 	m_directory = dir;
 	m_source    = path;
+	return true;
+}
+
+bool ImageLibrary::link_similar(
+	std::vector<ImagePattern>&                  patterns,
+	const std::map<std::string, size_t>&        index,
+	const std::vector<std::vector<std::string>>& named,
+	const std::wstring&                         path,
+	std::string&                                error)
+{
+	for (size_t at = 0; at < patterns.size(); ++at) {
+		ImagePattern& pattern = patterns[at];
+
+		for (const std::string& other : named[at]) {
+			// A name that is not in the library can only be a typo, and
+			// letting it through would quietly drop the very protection
+			// it was written to ask for.
+			const auto found = index.find(other);
+			if (index.end() == found) {
+				error = "image '" + pattern.name + "' in " + to_utf8(path)
+				      + ": " + KEY_SIMILAR + " names '" + other
+				      + "', which is not in the library";
+				return false;
+			}
+			const size_t twin = found->second;
+
+			if (twin == at) {
+				m_warnings.push_back(
+					"image '" + pattern.name + "': " + KEY_SIMILAR
+					+ " lists itself, ignored"
+				);
+				continue;
+			}
+			if (pattern.similar.end() != std::find(
+					pattern.similar.begin(), pattern.similar.end(), twin))
+			{
+				m_warnings.push_back(
+					"image '" + pattern.name + "': " + KEY_SIMILAR
+					+ " lists '" + other + "' more than once"
+				);
+				continue;
+			}
+			pattern.similar.push_back(twin);
+		}
+	}
+
+	// Similarity runs both ways whether or not the file says so twice, so
+	// naming it on either pattern is enough.
+	for (size_t at = 0; at < patterns.size(); ++at) {
+		for (const size_t twin : patterns[at].similar) {
+			std::vector<size_t>& back = patterns[twin].similar;
+			if (back.end() == std::find(back.begin(), back.end(), at))
+				back.push_back(at);
+		}
+	}
+
+	// A pattern only shares a search window with something near its own
+	// size, so a wild mismatch is more likely a mistake than a lookalike.
+	for (const ImagePattern& pattern : patterns) {
+		for (const size_t twin : pattern.similar) {
+			const ImagePattern& other = patterns[twin];
+			if (other.name < pattern.name) continue;   // report each pair once
+
+			const double spread = std::max(
+				std::abs(pattern.width()  - other.width())
+					/ static_cast<double>(std::max(pattern.width(),  other.width())),
+				std::abs(pattern.height() - other.height())
+					/ static_cast<double>(std::max(pattern.height(), other.height()))
+			);
+			if (spread > ImagePattern::SIMILAR_SIZE_SPREAD) {
+				m_warnings.push_back(
+					"images '" + pattern.name + "' and '" + other.name
+					+ "' are declared similar but differ in size by "
+					+ std::to_string(static_cast<int>(spread * 100.0)) + "%"
+				);
+			}
+		}
+	}
 	return true;
 }
 

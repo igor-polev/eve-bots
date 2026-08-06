@@ -2,7 +2,7 @@
 	EVE bots for Windows.
 	Author: Igor Polev.
 
-	Settings - eve_bots.json configuration file.
+	Settings - eve_config.json configuration file.
 */
 
 #pragma once
@@ -12,10 +12,13 @@
 
 class Settings {
 public:
-	static constexpr const wchar_t* FILE_NAME = L"eve_bots.json";
+	static constexpr const wchar_t* FILE_NAME = L"eve_config.json";
 
 	// Highest capture rate the config file may ask for.
 	static constexpr unsigned MAX_FRAME_RATE = 240;
+	// Widest MIN_MARGINE worth allowing; past this a "small" window is
+	// most of the frame and the searches it guards stop being cheap.
+	static constexpr int MAX_MIN_MARGINE = 256;
 
 	// Looks for FILE_NAME in the working directory, then next to the
 	// executable. On failure returns false and fills error.
@@ -34,6 +37,10 @@ public:
 	const std::wstring& image_dir() const noexcept { return m_image_dir; }
 	// Match certainty a hit must reach when a pattern names no threshold.
 	double detect_threshold() const noexcept { return m_detect_threshold; }
+	// Smallest slack, in pixels, any search window is given: the floor
+	// under a FIXED_DIRECTIONS margin, and the room a candidate is allowed
+	// when it is weighed against the patterns it could be confused with.
+	int min_margine() const noexcept { return m_min_margine; }
 
 private:
 	std::wstring   m_source;
@@ -41,4 +48,5 @@ private:
 	unsigned       m_capture_frame_rate {0};
 	std::wstring   m_image_dir;
 	double         m_detect_threshold {0.0};
+	int            m_min_margine {0};
 };

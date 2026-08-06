@@ -51,6 +51,9 @@ int main()
 			std::cerr << "   [ERROR] " << error << std::endl;
 			return -1;
 		}
+		// Put right rather than fatal, but the file should still be fixed.
+		for (const std::string& warning : images.warnings())
+			std::cout << " [WARNING] " << warning << "\n";
 
 		// Programs carry their own defaults, so this file only overrides
 		// them: missing is a note, broken is fatal.

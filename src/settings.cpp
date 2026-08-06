@@ -23,6 +23,7 @@ constexpr const char* KEY_TITLE_PREFIX = "EVE_WINDOW_TITLE_PREFIX";
 constexpr const char* KEY_FRAME_RATE   = "CAPTURE_FRAME_RATE_DEFAULT";
 constexpr const char* KEY_IMAGE_DIR    = "IMAGE_LIBRARY_DIR";
 constexpr const char* KEY_THRESHOLD    = "DETECT_THRESHOLD_DEFAULT";
+constexpr const char* KEY_MIN_MARGINE  = "MIN_MARGINE";
 
 // Reads a required string setting.
 std::wstring read_string(const json& settings, const char* key)
@@ -67,8 +68,9 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 
 	EveWindowMatch eve_window;
 	std::wstring image_dir;
-	int64_t frame_rate {0};
-	double  threshold  {0.0};
+	int64_t frame_rate   {0};
+	int64_t min_margine  {0};
+	double  threshold    {0.0};
 	try {
 		eve_window.class_name   = read_string(settings, KEY_WINDOW_CLASS);
 		eve_window.title_prefix = read_string(settings, KEY_TITLE_PREFIX);
@@ -87,6 +89,13 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 				std::string(KEY_THRESHOLD) + " must be a number"
 			);
 		threshold = certainty.get<double>();
+
+		const json& margine = settings.at(KEY_MIN_MARGINE);
+		if (!margine.is_number_integer())
+			throw std::runtime_error(
+				std::string(KEY_MIN_MARGINE) + " must be a whole number"
+			);
+		min_margine = margine.get<int64_t>();
 	}
 	catch (const json::out_of_range&) {
 		// at() names the missing key in its message, but not helpfully
@@ -96,7 +105,8 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		      + KEY_TITLE_PREFIX + ", "
 		      + KEY_FRAME_RATE   + ", "
 		      + KEY_IMAGE_DIR    + ", "
-		      + KEY_THRESHOLD;
+		      + KEY_THRESHOLD    + ", "
+		      + KEY_MIN_MARGINE;
 		return false;
 	}
 	catch (const std::exception& e) {
@@ -127,10 +137,19 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		error = std::string(KEY_IMAGE_DIR) + " is empty in " + to_utf8(path);
 		return false;
 	}
+	// Zero would leave a search window exactly the size of the pattern,
+	// with no room for anything to have moved a pixel.
+	if (min_margine < 1 || min_margine > MAX_MIN_MARGINE) {
+		error = std::string(KEY_MIN_MARGINE) + " is in pixels and must be "
+		      + "between 1 and " + std::to_string(MAX_MIN_MARGINE)
+		      + " (got " + std::to_string(min_margine) + ")";
+		return false;
+	}
 
 	m_eve_window         = std::move(eve_window);
 	m_capture_frame_rate = static_cast<unsigned>(frame_rate);
 	m_detect_threshold   = threshold;
+	m_min_margine        = static_cast<int>(min_margine);
 	// a relative image folder is meant relative to the settings file,
 	// not to whatever directory the app happens to be started from
 	m_image_dir          = join_path(directory_of(path), image_dir);

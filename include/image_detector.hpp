@@ -29,7 +29,8 @@
 
 struct DetectionHit {
 	cv::Point at;             // top left corner of the match, in frame pixels
-	double    certainty {0.0};   // 0..1, how well the pattern matched
+	double    certainty {0.0};   // 0..1, how well the shape matched
+	double    fit {0.0};         // 0..1 RMS pixel difference, lower is closer
 };
 
 // Which part of the frame a search covered. Reported back because the two
@@ -45,6 +46,7 @@ struct Detection {
 	std::vector<DetectionHit> hits;
 	SearchScope scope {SearchScope::FULL};
 	cv::Rect    box;   // the quick box, empty unless scope mentions one
+	int         mistaken {0};   // candidates a similar pattern claimed
 
 	bool quick() const noexcept { return SearchScope::BOX == scope; }
 };
@@ -68,9 +70,15 @@ public:
 	static constexpr double SEARCH_MARGINE_DEFAULT = 0.1;
 	static constexpr int    SEARCH_MARGINE_MIN     = 4;
 
+	// Smallest slack any search window gets, from MIN_MARGINE in the
+	// settings. Set before start(); the default only keeps the detector
+	// usable if nobody does.
+	void set_min_margine(int pixels) noexcept { m_min_margine = pixels; }
+	int  min_margine() const noexcept { return m_min_margine; }
+
 	// Slack in pixels along each axis for one pattern: its own fraction
-	// where it named one, this class's default where it did not.
-	static cv::Point search_margines(const ImagePattern& pattern);
+	// where it named one, MIN_MARGINE where it did not.
+	cv::Point search_margines(const ImagePattern& pattern) const;
 
 	// library and capture must outlive the detector.
 	// The library is not const: a successful search records where the
@@ -127,26 +135,39 @@ private:
 	) const;
 
 	// Searches one rectangle of a BGRA frame. Hits come back in frame
-	// coordinates, best match first.
-	static void search_area(
+	// coordinates, best match first. mistaken counts the candidates a
+	// similar pattern turned out to explain better.
+	void search_area(
 		const cv::Mat&             captured,
 		const cv::Rect&            area,
 		const ImagePattern&        pattern,
 		int                        max_hits,
-		std::vector<DetectionHit>& hits
-	);
+		std::vector<DetectionHit>& hits,
+		int&                       mistaken
+	) const;
+
+	// Closest this pattern comes to any position in a window of the scene,
+	// as a root mean square pixel difference on the images' own 0..1
+	// scale. Normalised by the mask, so patterns of different sizes are
+	// still comparable. WORST_FIT when it does not fit in the window.
+	double best_fit(
+		const cv::Mat&      scene,
+		const cv::Rect&     window,
+		const ImagePattern& pattern
+	) const;
 
 	// The box a quick search covers: the pattern at its remembered corner,
 	// grown by a margin along every fixed direction and spanning the whole
 	// frame along the others.
-	static cv::Rect quick_box(
+	cv::Rect quick_box(
 		const ImagePattern& pattern,
 		const cv::Point&    last,
 		const cv::Rect&     frame
-	);
+	) const;
 
 	ImageLibrary*        m_library {nullptr};
 	const ScreenCapture* m_capture {nullptr};
+	int                  m_min_margine {4};
 
 	std::atomic<bool>       m_running       {false};
 	std::atomic<uint64_t>   m_request_count {0};

@@ -44,6 +44,10 @@ struct ImagePattern {
 	static bool margine_given(double fraction) noexcept
 		{ return fraction >= 0.0; }
 
+	// Patterns whose sizes differ by more than this are unlikely to be
+	// the lookalikes somebody meant to declare, and get a warning.
+	static constexpr double SIMILAR_SIZE_SPREAD = 0.25;
+
 	std::string  name;     // key the 'detect' command uses
 	std::wstring file;     // path as written in eve_images.json
 	std::wstring path;     // where the file was actually read from
@@ -58,6 +62,13 @@ struct ImagePattern {
 	double search_margine   {MARGINE_UNSET};
 	double search_margine_x {MARGINE_UNSET};
 	double search_margine_y {MARGINE_UNSET};
+
+	// Patterns this one can be mistaken for, by position in the library.
+	// The correlation the search runs on scores by shape and is blind to
+	// hue, so a match is only kept once it has been weighed against these
+	// and none of them fits the same pixels better. Symmetric: naming it
+	// on either pattern is enough.
+	std::vector<size_t> similar;
 
 	cv::Mat image;  // CV_32FC3, BGR, values 0..1
 	cv::Mat mask;   // CV_32FC3 weights; empty when the PNG is fully opaque
@@ -108,6 +119,11 @@ public:
 	const std::wstring& source_path() const noexcept { return m_source; }
 	const std::wstring& directory()   const noexcept { return m_directory; }
 
+	// Things put right while loading that the file should still be fixed
+	// for. Empty when there was nothing to say.
+	const std::vector<std::string>& warnings() const noexcept
+		{ return m_warnings; }
+
 	bool   empty() const noexcept { return m_patterns.empty(); }
 	size_t size()  const noexcept { return m_patterns.size(); }
 	const std::vector<ImagePattern>& patterns() const noexcept
@@ -151,8 +167,19 @@ public:
 	}
 
 private:
+	// Resolves every SIMILAR name to a position, makes the relation
+	// symmetric, and complains about what it had to put right.
+	bool link_similar(
+		std::vector<ImagePattern>&           patterns,
+		const std::map<std::string, size_t>& index,
+		const std::vector<std::vector<std::string>>& named,
+		const std::wstring&                  path,
+		std::string&                         error
+	);
+
 	std::wstring m_source;
 	std::wstring m_directory;
+	std::vector<std::string> m_warnings;
 	std::vector<ImagePattern> m_patterns;
 	std::map<std::string, size_t> m_index;
 
