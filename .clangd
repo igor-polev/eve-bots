@@ -1,0 +1,40 @@
+# clangd configuration (VSCodium / any clangd-based editor).
+#
+# Flags come primarily from compile_commands.json, which is emitted by the
+# `windows-clangcl` preset. The `windows-msvc` preset cannot produce one -- the
+# Visual Studio generator ignores CMAKE_EXPORT_COMPILE_COMMANDS -- so configure
+# the Ninja-based preset at least once:
+#
+#     cmake --preset windows-clangcl
+#
+# The Add: block is the fallback used when that build tree is missing, and
+# mirrors .vscode/c_cpp_properties.json. Keep the two in sync if include paths,
+# defines or the toolchain version change.
+
+CompileFlags:
+  CompilationDatabase: build/windows-clangcl
+  Compiler: clang-cl
+  Add:
+    - /std:c++20
+    - /EHsc
+    - /D_DEBUG
+    - /DUNICODE
+    - /D_UNICODE
+    - /DWIN32_LEAN_AND_MEAN
+    - /DNOMINMAX
+    # project
+    - /IC:/Users/igor/dev/eve-bots/include
+    - /IC:/Users/igor/dev/eve-bots/src
+    # vcpkg (OpenCV, nlohmann, libpng, zlib)
+    - /IC:/Users/igor/dev/eve-bots/build/windows-msvc/vcpkg_installed/x64-windows/include
+    - /IC:/Users/igor/dev/eve-bots/build/windows-msvc/vcpkg_installed/x64-windows/include/opencv4
+    # MSVC 14.44.35207 standard library
+    - "/IC:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include"
+    # Windows SDK 10.0.26100.0
+    - "/IC:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt"
+    - "/IC:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um"
+    - "/IC:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared"
+    - "/IC:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt"
+
+Diagnostics:
+  UnusedIncludes: Strict

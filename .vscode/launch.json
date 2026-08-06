@@ -2,15 +2,19 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug eve_bots (MSVC)",
-            "type": "cppvsdbg",
+            // Debugs whatever target CMake Tools has selected. Pick the
+            // `windows-clangcl` preset -- LLDB reads the CodeView/PDB output of
+            // clang-cl + lld-link natively.
+            "name": "Debug eve_bots (clang-cl + LLDB)",
+            "type": "lldb",
             "request": "launch",
             "program": "${command:cmake.launchTargetPath}",
             "args": [],
-            "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
-            "environment": [],
-            "console": "integratedTerminal"
+            "env": {
+                "PATH": "${command:cmake.launchTargetDirectory};${env:PATH}"
+            },
+            "terminal": "integrated"
         }
     ]
 }

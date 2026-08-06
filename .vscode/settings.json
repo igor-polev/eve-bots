@@ -1,6 +1,14 @@
 {
     "cmake.useCMakePresets": "always",
+    // cpptools (VS Code only -- ignored by clangd-based editors such as VSCodium)
     "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    // clangd (VSCodium). Flags live in ../.clangd; clangd.path is machine-specific
+    // and belongs in user settings, not here.
+    "clangd.arguments": [
+        "--background-index",
+        "--header-insertion=never",
+        "--pch-storage=memory"
+    ],
     "files.associations": {
         "*.hpp": "cpp"
     }

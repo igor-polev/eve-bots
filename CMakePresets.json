@@ -11,6 +11,21 @@
             "cacheVariables": {
                 "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
             }
+        },
+        {
+            "name": "windows-clangcl",
+            "displayName": "Windows x64 (clang-cl + LLD, debuggable with LLDB)",
+            "description": "Debug toolset. Ninja is required so CMake emits compile_commands.json for clangd; clang-cl keeps the MSVC ABI, so it links against the vcpkg tree built by the windows-msvc preset.",
+            "generator": "Ninja Multi-Config",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/build/windows-msvc/vcpkg_installed",
+                "CMAKE_C_COMPILER": "clang-cl",
+                "CMAKE_CXX_COMPILER": "clang-cl",
+                "CMAKE_LINKER_TYPE": "LLD",
+                "CMAKE_CXX_FLAGS_DEBUG": "/Z7 /Od /Ob0"
+            }
         }
     ],
     "buildPresets": [
@@ -22,6 +37,16 @@
         {
             "name": "windows-msvc-release",
             "configurePreset": "windows-msvc",
+            "configuration": "Release"
+        },
+        {
+            "name": "windows-clangcl-debug",
+            "configurePreset": "windows-clangcl",
+            "configuration": "Debug"
+        },
+        {
+            "name": "windows-clangcl-release",
+            "configurePreset": "windows-clangcl",
             "configuration": "Release"
         }
     ]
