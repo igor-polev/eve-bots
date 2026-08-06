@@ -6,6 +6,8 @@
 */
 
 #include <algorithm>
+#include <iomanip>
+#include <sstream>
 
 #include "program.hpp"
 
@@ -14,7 +16,32 @@ namespace {
 // A program sleeping between attempts checks for a stop this often.
 constexpr std::chrono::milliseconds WAIT_STEP {50};
 
+// Pause between two attempts at the same pattern. A full frame search
+// already costs seconds, so this only matters once a quick box search is
+// possible - and then it keeps a program from spinning on the CPU.
+constexpr std::chrono::milliseconds RETRY_PAUSE {250};
+
 } // namespace
+
+std::chrono::milliseconds since(ProgramClock::time_point start)
+{
+	return std::chrono::duration_cast<std::chrono::milliseconds>(
+		ProgramClock::now() - start
+	);
+}
+
+std::string seconds_text(std::chrono::milliseconds spent)
+{
+	std::ostringstream text;
+	text << std::fixed << std::setprecision(1)
+	     << (spent.count() / 1000.0) << " s";
+	return text.str();
+}
+
+std::string point_text(const cv::Point& at)
+{
+	return std::to_string(at.x) + "," + std::to_string(at.y);
+}
 
 std::string program_exit_text(ProgramExit exit)
 {
@@ -55,6 +82,68 @@ bool Program::wait(std::chrono::milliseconds duration) const
 		std::this_thread::sleep_for(std::min(WAIT_STEP, left));
 	}
 	return !stopping();
+}
+
+Program::Look Program::look_once(
+	ProgramContext&           context,
+	size_t                    image,
+	std::chrono::milliseconds budget,
+	cv::Point&                corner,
+	std::string&              trouble) const
+{
+	if (stopping()) return Look::STOPPED;
+	if (budget <= std::chrono::milliseconds::zero()) return Look::MISSING;
+
+	// The search gets what is left of the budget and no more, so one slow
+	// full frame pass cannot overrun the whole timeout.
+	const ProgramClock::time_point began = ProgramClock::now();
+	Detection found;
+	if (!context.detector.detect(image, 1, false, found, trouble, budget)) {
+		// Running out of the time it was given is not a fault, it is the
+		// answer: the pattern was not there within the budget.
+		return since(began) >= budget ? Look::MISSING : Look::TROUBLE;
+	}
+	if (found.hits.empty()) return Look::MISSING;
+
+	corner = found.hits.front().at;
+	return Look::FOUND;
+}
+
+Program::Look Program::look_for(
+	ProgramContext&           context,
+	size_t                    image,
+	std::chrono::milliseconds budget,
+	cv::Point&                corner,
+	std::string&              trouble) const
+{
+	const ProgramClock::time_point deadline = ProgramClock::now() + budget;
+	while (true) {
+		const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+			deadline - ProgramClock::now()
+		);
+		if (left <= std::chrono::milliseconds::zero()) return Look::MISSING;
+
+		const Look seen = look_once(context, image, left, corner, trouble);
+		// Only "not on screen this time" is worth another attempt.
+		if (Look::MISSING != seen) return seen;
+
+		if (!wait(RETRY_PAUSE)) return Look::STOPPED;
+	}
+}
+
+bool Program::click_middle(
+	ProgramContext&  context,
+	size_t           image,
+	const cv::Point& corner,
+	ClickResult&     click,
+	std::string&     trouble) const
+{
+	const ImagePattern& pattern = context.images(image);
+	const cv::Point target =
+		corner + cv::Point {pattern.width() / 2, pattern.height() / 2};
+	return click_at(
+		context.capture.target(), target, UI_WAIT_DEFAULT, click, trouble
+	);
 }
 
 ProgramRunner::~ProgramRunner()

@@ -22,6 +22,7 @@ add_executable(${PROJECT_NAME}
     src/program_params.cpp
     src/program.cpp
     src/undock_program.cpp
+    src/autopilot_program.cpp
 )
 target_include_directories(${PROJECT_NAME} PRIVATE include)
 

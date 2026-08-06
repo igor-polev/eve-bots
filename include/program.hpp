@@ -29,8 +29,18 @@
 
 #include "image_detector.hpp"
 #include "image_library.hpp"
+#include "mouse_input.hpp"
 #include "program_params.hpp"
 #include "screen_capture.hpp"
+
+using ProgramClock = std::chrono::steady_clock;
+
+// How long ago something happened.
+std::chrono::milliseconds since(ProgramClock::time_point start);
+// "4.2 s"
+std::string seconds_text(std::chrono::milliseconds spent);
+// "789,1245"
+std::string point_text(const cv::Point& at);
 
 // Everything a program is allowed to touch. Held by reference, so the
 // objects behind it must outlive any run.
@@ -75,16 +85,54 @@ public:
 	// Does the job. Called on the program thread by ProgramRunner.
 	ProgramResult exec(ProgramContext& context);
 
-	// Asks a running exec() to give up at its next check point.
-	void request_stop() noexcept { m_stop.store(true); }
-	bool stopping()     const noexcept { return m_stop.load(); }
+	// Asks a running exec() to give up at its next check point. Virtual
+	// because a program built out of other programs has to pass this on
+	// to whichever one is doing the work for it.
+	virtual void request_stop() noexcept { m_stop.store(true); }
+	bool stopping() const noexcept { return m_stop.load(); }
 
 protected:
+	// What looking for one pattern ended in.
+	enum class Look {
+		FOUND,
+		MISSING,   // not on screen within the budget - an answer, not a fault
+		STOPPED,
+		TROUBLE    // the search itself could not run
+	};
+
 	virtual ProgramResult run(ProgramContext& context) = 0;
 
 	// Sleeps in short steps so a stop request is noticed quickly.
 	// False means the program was asked to stop and should return.
 	bool wait(std::chrono::milliseconds duration) const;
+
+	// One search and no more.
+	Look look_once(
+		ProgramContext&           context,
+		size_t                    image,
+		std::chrono::milliseconds budget,
+		cv::Point&                corner,
+		std::string&              trouble
+	) const;
+
+	// Repeats look_once until the pattern turns up or the budget runs out.
+	Look look_for(
+		ProgramContext&           context,
+		size_t                    image,
+		std::chrono::milliseconds budget,
+		cv::Point&                corner,
+		std::string&              trouble
+	) const;
+
+	// Clicks the middle of a pattern sitting at corner. The corner is
+	// where a match starts; the middle is what a person would aim at.
+	bool click_middle(
+		ProgramContext&  context,
+		size_t           image,
+		const cv::Point& corner,
+		ClickResult&     click,
+		std::string&     trouble
+	) const;
 
 private:
 	std::string       m_name;

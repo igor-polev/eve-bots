@@ -13,6 +13,7 @@
 #include <sstream>
 #include <thread>
 
+#include "autopilot_program.hpp"
 #include "cli.hpp"
 #include "png_writer.hpp"
 #include "text_util.hpp"
@@ -511,6 +512,7 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 bool Cli::load_programs()
 {
 	m_programs.add(std::make_unique<UndockProgram>());
+	m_programs.add(std::make_unique<AutopilotProgram>());
 
 	std::string error;
 	if (!m_programs.configure(m_params, error)) {

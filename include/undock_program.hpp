@@ -56,28 +56,6 @@ protected:
 	ProgramResult run(ProgramContext& context) override;
 
 private:
-	// What looking for one pattern ended in.
-	enum class Look { FOUND, MISSING, STOPPED, TROUBLE };
-
-	// One search and no more. MISSING means it was not on screen this
-	// time, which is an answer rather than a fault.
-	Look look_once(
-		ProgramContext&           context,
-		size_t                    image,
-		std::chrono::milliseconds budget,
-		cv::Point&                corner,
-		std::string&              trouble
-	) const;
-
-	// Repeats look_once until the pattern turns up or the budget runs out.
-	Look look_for(
-		ProgramContext&           context,
-		size_t                    image,
-		std::chrono::milliseconds budget,
-		cv::Point&                corner,
-		std::string&              trouble
-	) const;
-
 	std::chrono::milliseconds m_search_timeout {SEARCH_TIMEOUT_DEFAULT};
 	std::chrono::milliseconds m_undock_timeout {UNDOCK_TIMEOUT_DEFAULT};
 };

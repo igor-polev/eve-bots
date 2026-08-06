@@ -5,45 +5,16 @@
 	UndockProgram implementation.
 */
 
-#include <iomanip>
-#include <sstream>
-
 #include "undock_program.hpp"
 
 namespace {
-
-// Pause between two attempts at the same pattern. A full frame search
-// already costs seconds, so this only matters once a quick box search is
-// possible - and then it keeps the program from spinning on the CPU.
-constexpr std::chrono::milliseconds RETRY_PAUSE {250};
 
 // Given to the game between clicking undock and looking for the result.
 // The undock animation is long, so this is only meant to cover the click
 // being processed at all; the retries cover the rest.
 constexpr std::chrono::milliseconds AFTER_CLICK {1000};
 
-using Clock = std::chrono::steady_clock;
-
-std::chrono::milliseconds since(Clock::time_point start)
-{
-	return std::chrono::duration_cast<std::chrono::milliseconds>(
-		Clock::now() - start
-	);
-}
-
-// "4.2 s"
-std::string seconds_text(std::chrono::milliseconds spent)
-{
-	std::ostringstream text;
-	text << std::fixed << std::setprecision(1)
-	     << (spent.count() / 1000.0) << " s";
-	return text.str();
-}
-
-std::string point_text(const cv::Point& at)
-{
-	return std::to_string(at.x) + "," + std::to_string(at.y);
-}
+using Clock = ProgramClock;
 
 } // namespace
 
@@ -78,53 +49,6 @@ bool UndockProgram::configure(const ProgramParams& params, std::string& error)
 	m_undock_timeout =
 		std::chrono::milliseconds {static_cast<long long>(undock)};
 	return true;
-}
-
-UndockProgram::Look UndockProgram::look_once(
-	ProgramContext&           context,
-	size_t                    image,
-	std::chrono::milliseconds budget,
-	cv::Point&                corner,
-	std::string&              trouble) const
-{
-	if (stopping()) return Look::STOPPED;
-	if (budget <= std::chrono::milliseconds::zero()) return Look::MISSING;
-
-	// The search gets what is left of the budget and no more, so one slow
-	// full frame pass cannot overrun the whole timeout.
-	const Clock::time_point began = Clock::now();
-	Detection found;
-	if (!context.detector.detect(image, 1, false, found, trouble, budget)) {
-		// Running out of the time it was given is not a fault, it is the
-		// answer: the pattern was not there within the budget.
-		return since(began) >= budget ? Look::MISSING : Look::TROUBLE;
-	}
-	if (found.hits.empty()) return Look::MISSING;
-
-	corner = found.hits.front().at;
-	return Look::FOUND;
-}
-
-UndockProgram::Look UndockProgram::look_for(
-	ProgramContext&           context,
-	size_t                    image,
-	std::chrono::milliseconds budget,
-	cv::Point&                corner,
-	std::string&              trouble) const
-{
-	const Clock::time_point deadline = Clock::now() + budget;
-	while (true) {
-		const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
-			deadline - Clock::now()
-		);
-		if (left <= std::chrono::milliseconds::zero()) return Look::MISSING;
-
-		const Look seen = look_once(context, image, left, corner, trouble);
-		// Only "not on screen this time" is worth another attempt.
-		if (Look::MISSING != seen) return seen;
-
-		if (!wait(RETRY_PAUSE)) return Look::STOPPED;
-	}
 }
 
 ProgramResult UndockProgram::run(ProgramContext& context)
@@ -207,18 +131,13 @@ ProgramResult UndockProgram::run(ProgramContext& context)
 	}
 
 	// 2. Click the middle of it.
-	const ImagePattern& button = context.images(undock);
-	const cv::Point target =
-		corner + cv::Point {button.width() / 2, button.height() / 2};
-
 	ClickResult clicked;
-	if (!click_at(context.capture.target(), target, UI_WAIT_DEFAULT,
-	              clicked, trouble))
-	{
+	if (!click_middle(context, undock, corner, clicked, trouble)) {
 		return {ProgramExit::FAILURE,
-		        "cannot click the undock button at " + point_text(target)
+		        "cannot click the undock button at " + point_text(corner)
 		        + ": " + trouble};
 	}
+	const cv::Point target = clicked.frame;
 	const Clock::time_point pressed = Clock::now();
 	if (!wait(AFTER_CLICK))
 		return {ProgramExit::STOPPED, "stopped just after clicking undock"};

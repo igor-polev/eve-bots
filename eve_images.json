@@ -7,6 +7,24 @@
             "FIXED_DIRECTIONS": "XY"
         },
         {
+            "NAME"            : "warp",
+            "FILE"            : "msg_warp.png",
+            "COMMENT"         : "Warp is active message",
+            "FIXED_DIRECTIONS": "XY"
+        },
+        {
+            "NAME"            : "jump",
+            "FILE"            : "btn_jump.png",
+            "COMMENT"         : "Gate jump button in the OW panel",
+            "FIXED_DIRECTIONS": "XY"
+        },
+        {
+            "NAME"            : "dock",
+            "FILE"            : "btn_dock.png",
+            "COMMENT"         : "Station dock button in the OW panel",
+            "FIXED_DIRECTIONS": "XY"
+        },
+        {
             "NAME"            : "shipcore",
             "FILE"            : "ui_ship_core.png",
             "COMMENT"         : "Main ship control unit in space",
