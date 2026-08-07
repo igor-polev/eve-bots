@@ -14,8 +14,8 @@
             "ENTER_WARP_TIMEOUT" : 30000,
             "WARP_RECHECK_PAUSE" : 2000,
             "MAX_JUMP_TIMEOUT"   : 300000,
-            "GATE_JUMP_PAUSE"    : 15000,
-            "DOCKING_PAUSE"      : 20000,
+            "GATE_JUMP_PAUSE"    : 5000,
+            "DOCKING_PAUSE"      : 10000,
             "DOCKING_TIMEOUT"    : 40000
         }
     ]

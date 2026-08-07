@@ -29,6 +29,7 @@
 #include "screen_capture.hpp"
 
 struct DetectionHit {
+	size_t    image {0};      // which pattern matched, into the library
 	cv::Point at;             // top left corner of the match, in frame pixels
 	double    certainty {0.0};   // 0..1, how well the shape matched
 	double    fit {0.0};         // 0..1 RMS pixel difference, lower is closer
@@ -38,18 +39,31 @@ struct DetectionHit {
 // differ by two orders of magnitude in cost, so a caller wondering why a
 // detection was slow needs to see which one it got.
 enum class SearchScope {
+	NONE,          // not looked for: another pattern had already answered
 	FULL,          // the whole frame
 	BOX,           // only the box around the remembered position
 	BOX_THEN_FULL  // the box missed, so the whole frame followed
 };
 
-struct Detection {
-	std::vector<DetectionHit> hits;
-	SearchScope scope {SearchScope::FULL};
-	cv::Rect    box;   // the quick box, empty unless scope mentions one
+// One pattern's share of a search. A detection may cover several patterns
+// at once, and they need not have been looked for in the same way: each
+// keeps its place along its own axes, so each has its own box or none.
+struct PatternSearch {
+	size_t      image {0};
+	SearchScope scope {SearchScope::NONE};
+	cv::Rect    box;            // the quick box, empty unless scope names one
 	int         mistaken {0};   // candidates a similar pattern claimed
+};
 
-	bool quick() const noexcept { return SearchScope::BOX == scope; }
+struct Detection {
+	// Best match first, whichever pattern it came from. Certainties from
+	// different patterns are not strictly comparable, but they are all
+	// the same kind of number and there is nothing better to sort by.
+	std::vector<DetectionHit>  hits;
+	// One per pattern the search was asked for, in the order they were
+	// given, whether or not it turned anything up - and whether or not it
+	// was looked for at all, since one pattern answering spares the rest.
+	std::vector<PatternSearch> searched;
 };
 
 class ImageDetector {
@@ -100,16 +114,32 @@ public:
 	bool     running()       const noexcept { return m_running.load(); }
 	uint64_t request_count() const noexcept { return m_request_count.load(); }
 
-	// Searches the most recent frame for one library pattern and waits for
-	// the answer. Returns false on error - no capture running, unknown
-	// name, timeout - and fills error; result is then left alone.
-	// Finding nothing is not an error: it returns true with no hits.
+	// Searches the most recent frame for library patterns and waits for the
+	// answer. Returns false on error - no capture running, unknown name,
+	// timeout - and fills error; result is then left alone. Finding nothing
+	// is not an error: it returns true with no hits.
+	//
+	// Several patterns mean "any of these": they are all the same thing as
+	// far as the caller is concerned, every one of the max_hits reported
+	// may come from any of them, and each hit says which pattern it was.
+	// This is not the same as searching for them one after another - the
+	// boxes of all of them are looked at before any full frame search is,
+	// so a pattern that has moved cannot cost the others their quick pass.
 	//
 	// A pattern with FIXED_DIRECTIONS that has been found before is first
-	// looked for in a box around that position, and only then, if that
-	// missed, in the whole frame. quick_only stops after the box - it is
-	// for a caller that would rather have a fast "no" than a slow "yes",
-	// and is an error when there is no box to search.
+	// looked for in a box around that position, and only then, if nothing
+	// at all turned up, in the whole frame. quick_only stops after the
+	// boxes - it is for a caller that would rather have a fast "no" than a
+	// slow "yes", and is an error unless every pattern has a box.
+	bool detect(
+		const std::vector<size_t>& images,
+		int                        max_hits,
+		bool                       quick_only,
+		Detection&                 result,
+		std::string&               error,
+		std::chrono::milliseconds  timeout = DEFAULT_TIMEOUT
+	);
+	// One pattern, the common case.
 	bool detect(
 		size_t                    image,
 		int                       max_hits,
@@ -118,9 +148,17 @@ public:
 		std::string&              error,
 		std::chrono::milliseconds timeout = DEFAULT_TIMEOUT
 	);
-	// Same, for a name that has not been resolved yet. An unknown name is
-	// the one failure the index form cannot report, so it is spelt out
+	// Same, for names that have not been resolved yet. An unknown name is
+	// the one failure the index forms cannot report, so it is spelt out
 	// here rather than left to the caller.
+	bool detect(
+		const std::vector<std::string>& names,
+		int                             max_hits,
+		bool                            quick_only,
+		Detection&                      result,
+		std::string&                    error,
+		std::chrono::milliseconds       timeout = DEFAULT_TIMEOUT
+	);
 	bool detect(
 		const std::string&        name,
 		int                       max_hits,
@@ -130,24 +168,29 @@ public:
 		std::chrono::milliseconds timeout = DEFAULT_TIMEOUT
 	);
 
+	// "'jump'", "'jump' or 'dock'", "'a', 'b' or 'c'" - for messages about
+	// a search that covered more than one pattern.
+	std::string names_text(const std::vector<size_t>& images) const;
+
 private:
 	void detect_loop();
 	// Runs one search. Reports trouble through error rather than throwing.
 	void run_match(
-		size_t       image,
-		int          max_hits,
-		bool         quick_only,
-		Detection&   result,
-		std::string& error
+		const std::vector<size_t>& images,
+		int                        max_hits,
+		bool                       quick_only,
+		Detection&                 result,
+		std::string&               error
 	) const;
 
-	// Searches one rectangle of a BGRA frame. Hits come back in frame
-	// coordinates, best match first. mistaken counts the candidates a
-	// similar pattern turned out to explain better.
+	// Searches one rectangle of a BGRA frame for one pattern. Hits come
+	// back in frame coordinates, best match first, replacing whatever was
+	// in the vector. mistaken counts the candidates a similar pattern
+	// turned out to explain better.
 	void search_area(
 		const cv::Mat&             captured,
 		const cv::Rect&            area,
-		const ImagePattern&        pattern,
+		size_t                     image,
 		int                        max_hits,
 		std::vector<DetectionHit>& hits,
 		int&                       mistaken
@@ -192,10 +235,10 @@ private:
 	uint64_t m_request_serial {0};
 	uint64_t m_result_serial  {0};
 
-	size_t m_request_image    {0};
-	int    m_request_max_hits {1};
-	bool   m_request_quick    {false};
-	bool   m_pending          {false};
+	std::vector<size_t> m_request_images;
+	int                 m_request_max_hits {1};
+	bool                m_request_quick    {false};
+	bool                m_pending          {false};
 
 	Detection   m_result;
 	std::string m_result_error;

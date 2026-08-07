@@ -4,5 +4,6 @@
     "CAPTURE_FRAME_RATE_DEFAULT": 5,
     "IMAGE_LIBRARY_DIR"         : "img_lib",
     "DETECT_THRESHOLD_DEFAULT"  : 0.9,
-    "MIN_MARGINE"               : 4
+    "MIN_MARGINE"               : 4,
+    "MENU_HOTKEY"               : "Alt+`"
 }

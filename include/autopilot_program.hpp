@@ -10,6 +10,10 @@
 	command button to press afterwards, how long to wait once warp ends,
 	and whether arriving means the route is finished.
 
+	A station is drawn with one of two icons depending on whether it is the
+	home station, and the difference means nothing to flying a route, so
+	both are looked for at once and whichever turns up is the destination.
+
 	One pass through the loop is one hop:
 
 	    route icon -> click -> jump or dock button -> click
@@ -29,6 +33,7 @@
 
 #pragma once
 #include <chrono>
+#include <vector>
 
 #include "program.hpp"
 #include "undock_program.hpp"
@@ -36,12 +41,15 @@
 class AutopilotProgram : public Program {
 public:
 	// Patterns this program looks for, by their name in eve_images.json.
-	static constexpr const char* GATE_IMAGE    = "gate_route";
-	static constexpr const char* STATION_IMAGE = "station_route";
-	static constexpr const char* JUMP_IMAGE    = "jump";
-	static constexpr const char* DOCK_IMAGE    = "dock";
-	static constexpr const char* WARP_IMAGE    = "warp";
-	static constexpr const char* UNDOCK_IMAGE  = "undock";
+	// The two station icons are the same thing here: either one in the
+	// route panel means the next hop ends at the destination.
+	static constexpr const char* GATE_IMAGE         = "gate_route";
+	static constexpr const char* STATION_IMAGE      = "station_route";
+	static constexpr const char* STATION_HOME_IMAGE = "station_home_route";
+	static constexpr const char* JUMP_IMAGE         = "jump";
+	static constexpr const char* DOCK_IMAGE         = "dock";
+	static constexpr const char* WARP_IMAGE         = "warp";
+	static constexpr const char* UNDOCK_IMAGE       = "undock";
 
 	// Parameter names in prog_params.json, and what they mean without it.
 	static constexpr const char* KEY_DESTINATION_TIMEOUT = "DESTINATION_TIMEOUT";
@@ -58,8 +66,8 @@ public:
 	static constexpr int ENTER_WARP_TIMEOUT_DEFAULT  =  30000;
 	static constexpr int WARP_RECHECK_PAUSE_DEFAULT  =   2000;
 	static constexpr int MAX_JUMP_TIMEOUT_DEFAULT    = 300000;
-	static constexpr int GATE_JUMP_PAUSE_DEFAULT     =  15000;
-	static constexpr int DOCKING_PAUSE_DEFAULT       =  20000;
+	static constexpr int GATE_JUMP_PAUSE_DEFAULT     =   5000;
+	static constexpr int DOCKING_PAUSE_DEFAULT       =  10000;
 	static constexpr int DOCKING_TIMEOUT_DEFAULT     =  40000;
 
 	AutopilotProgram() : Program("autopilot") {}
@@ -79,8 +87,10 @@ protected:
 private:
 	// Everything one hop needs to know, resolved once at the start.
 	struct Waypoints {
-		size_t gate {0}, station {0}, jump {0}, dock {0};
+		size_t gate {0}, jump {0}, dock {0};
 		size_t warp {0}, undock {0};
+		// Every icon that marks the destination, searched for as one.
+		std::vector<size_t> stations;
 	};
 
 	// One hop. done is set when the route is finished and the ship docked.

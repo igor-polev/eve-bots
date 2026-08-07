@@ -37,11 +37,14 @@ constexpr const char* HELP_TEXT =
 	"                      client's remembered positions are in use\n"
 	"    dump [file.png]   write the current frame to a PNG file\n"
 	"    images            list the patterns loaded from eve_images.json\n"
-	"    detect <image> [n] [quick]\n"
+	"    detect <image>[,<image>...] [n] [quick]\n"
 	"                      search the current frame for a pattern, named or\n"
 	"                      numbered as 'images' lists it; matches are\n"
 	"                      reported by their top left corner. n is how many\n"
 	"                      to report at most, 1 by default.\n"
+	"                      Several patterns separated by commas mean any of\n"
+	"                      them will do: one search, and each of the n\n"
+	"                      matches may come from any pattern in the list.\n"
 	"                      A pattern with FIXED_DIRECTIONS that has been\n"
 	"                      found before is looked for near its last position\n"
 	"                      first; 'quick' searches only there and gives up\n"
@@ -55,7 +58,11 @@ constexpr const char* HELP_TEXT =
 	"                      stays usable and the outcome is printed when it\n"
 	"                      finishes\n"
 	"    abort             ask the running program to stop early\n"
-	"    exit              quit the application\n";
+	"    exit              quit the application\n"
+	"The hotkey named by MENU_HOTKEY in the settings brings the same list\n"
+	"of programs up over the captured window: click one to start it, or\n"
+	"Abort to stop whatever is running. Press it again, press Escape or\n"
+	"click elsewhere to put it away.\n";
 
 constexpr const char* CLICK_USAGE =
 	"Usage: click <image> [options]     the middle of a detected pattern\n"
@@ -142,6 +149,45 @@ std::string box_text(const cv::Rect& box)
 	return text.str();
 }
 
+// Where one pattern's share of a search looked, as a phrase to follow
+// "searched" or "looked for 'x' in".
+std::string scope_text(const PatternSearch& part)
+{
+	switch (part.scope) {
+	case SearchScope::BOX:
+		return box_text(part.box);
+	case SearchScope::BOX_THEN_FULL:
+		return "the whole frame, after " + box_text(part.box) + " missed";
+	case SearchScope::FULL:
+		return "the whole frame";
+	default:
+		return {};   // never looked at, see below
+	}
+}
+
+// "2 candidates were something similar", empty when none were. Worth
+// saying out loud: those are the difference between "not there" and
+// "not recognised".
+std::string mistaken_text(int mistaken)
+{
+	if (mistaken <= 0) return {};
+	return std::to_string(mistaken)
+	     + (1 == mistaken ? " candidate was" : " candidates were")
+	     + " something similar";
+}
+
+// "gate,station" -> the two names. Empty pieces are dropped, so a trailing
+// comma is not an error.
+std::vector<std::string> split_commas(const std::string& list)
+{
+	std::vector<std::string> pieces;
+	std::istringstream       stream {list};
+	std::string              piece;
+	while (std::getline(stream, piece, ','))
+		if (!piece.empty()) pieces.push_back(piece);
+	return pieces;
+}
+
 // eve_dump_20260729_143012.png
 std::wstring timestamped_name()
 {
@@ -188,6 +234,7 @@ int Cli::run()
 		m_detector.stop();
 		return -1;
 	}
+	load_menu();
 	std::cout << "Type 'help' for a list of commands.\n\n";
 
 	std::string line;
@@ -200,6 +247,9 @@ int Cli::run()
 		}
 		if (!dispatch(line)) break;
 	}
+	// Before the programs, so nothing can be started from the menu while
+	// the rest of this is taking itself apart.
+	m_menu.stop();
 	// A program still working would keep using the detector and the
 	// capture we are about to shut down.
 	if (m_programs.running()) {
@@ -406,6 +456,11 @@ void Cli::cmd_status() const
 	// The cache is written from the detection thread, which has no polite
 	// way to interrupt the console, so this is where trouble with it shows.
 	std::cout << "Positions: " << m_positions.state_text() << "\n";
+	std::cout << "Menu: "
+	          << (m_menu.running()
+	                  ? hotkey_text(m_menu.hotkey())
+	                  : std::string("not running"))
+	          << "\n";
 }
 
 void Cli::cmd_dump(const std::vector<std::string>& args) const
@@ -501,13 +556,28 @@ size_t Cli::resolve_image(const std::string& token) const
 void Cli::cmd_detect(const std::vector<std::string>& args)
 {
 	if (args.empty()) {
-		std::cout << "Usage: detect <image> [count] [quick]\n";
+		std::cout << "Usage: detect <image>[,<image>...] [count] [quick]\n";
 		cmd_images();
 		return;
 	}
 
-	const size_t image = resolve_image(args[0]);
-	if (ImageLibrary::NOT_FOUND == image) return;
+	// A comma separated list means any of them will do: one search, and
+	// every match reported may have come from any pattern in the list.
+	std::vector<size_t> images;
+	for (const std::string& token : split_commas(args[0])) {
+		const size_t image = resolve_image(token);
+		if (ImageLibrary::NOT_FOUND == image) return;
+		if (images.end() != std::find(images.begin(), images.end(), image)) {
+			std::cout << "'" << m_images(image).name
+			          << "' is in the list twice.\n";
+			return;
+		}
+		images.push_back(image);
+	}
+	if (images.empty()) {
+		std::cout << "Usage: detect <image>[,<image>...] [count] [quick]\n";
+		return;
+	}
 
 	// 'quick' may sit on either side of the count, so pick it out first and
 	// read whatever is left as the number of matches.
@@ -531,12 +601,13 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 		}
 	}
 
-	const std::string& name = m_images(image).name;
-	const auto started = std::chrono::steady_clock::now();
+	const std::string what    = m_detector.names_text(images);
+	const bool        several = images.size() > 1;
+	const auto        started = std::chrono::steady_clock::now();
 
 	Detection found;
 	std::string error;
-	if (!m_detector.detect(image, max_hits, quick, found, error)) {
+	if (!m_detector.detect(images, max_hits, quick, found, error)) {
 		std::cout << "   [ERROR] " << error << "\n";
 		return;
 	}
@@ -544,41 +615,49 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 		std::chrono::steady_clock::now() - started
 	);
 
-	std::string where;
-	switch (found.scope) {
-	case SearchScope::BOX:
-		where = ", searched " + box_text(found.box);
-		break;
-	case SearchScope::BOX_THEN_FULL:
-		where = ", " + box_text(found.box) + " missed, searched the whole frame";
-		break;
-	case SearchScope::FULL:
-		where = ", searched the whole frame";
-		break;
-	}
-
-	// Candidates that a lookalike explained better are worth saying out
-	// loud: they are the difference between "not there" and "not seen".
-	std::string mistaken;
-	if (found.mistaken > 0) {
-		mistaken = ", " + std::to_string(found.mistaken)
-		         + (1 == found.mistaken ? " candidate was" : " candidates were")
-		         + " something similar";
+	// With one pattern it all fits on the summary line; with several, each
+	// was looked for in its own way and gets a line of its own below.
+	std::string where, mistaken;
+	if (!several) {
+		where = ", searched " + scope_text(found.searched.front());
+		const std::string claimed =
+			mistaken_text(found.searched.front().mistaken);
+		if (!claimed.empty()) mistaken = ", " + claimed;
 	}
 
 	if (found.hits.empty()) {
-		std::cout << "'" << name << "' not found ("
-		          << spent.count() << " ms" << where << mistaken << ").\n";
-		return;
+		std::cout << what << " not found ("
+		          << spent.count() << " ms" << where << mistaken << ")"
+		          << (several ? ":" : ".") << "\n";
+	} else {
+		std::cout << what << " found " << found.hits.size()
+		          << (1 == found.hits.size() ? " time (" : " times (")
+		          << spent.count() << " ms" << where << mistaken << "):\n";
+		for (const DetectionHit& hit : found.hits) {
+			std::cout << "  ";
+			if (several) std::cout << "'" << m_images(hit.image).name << "' ";
+			std::cout << "corner " << hit.at.x << "," << hit.at.y
+			          << "  certainty " << certainty_text(hit.certainty);
+			if (!m_images(hit.image).similar.empty())
+				std::cout << "  fit " << certainty_text(hit.fit);
+			std::cout << "\n";
+		}
 	}
-	std::cout << "'" << name << "' found " << found.hits.size()
-	          << (1 == found.hits.size() ? " time (" : " times (")
-	          << spent.count() << " ms" << where << mistaken << "):\n";
-	for (const DetectionHit& hit : found.hits) {
-		std::cout << "  corner " << hit.at.x << "," << hit.at.y
-		          << "  certainty " << certainty_text(hit.certainty);
-		if (!m_images(image).similar.empty())
-			std::cout << "  fit " << certainty_text(hit.fit);
+
+	if (!several) return;
+	for (const PatternSearch& part : found.searched) {
+		const std::string name = m_images(part.image).name;
+		// A pattern the search never reached is not a pattern that was not
+		// there: any one of them was all that was asked for, and one of the
+		// others answered before this one cost anything.
+		if (SearchScope::NONE == part.scope) {
+			std::cout << "  did not look for '" << name
+			          << "': another pattern answered first\n";
+			continue;
+		}
+		std::cout << "  looked for '" << name << "' in " << scope_text(part);
+		const std::string claimed = mistaken_text(part.mistaken);
+		if (!claimed.empty()) std::cout << ", " << claimed;
 		std::cout << "\n";
 	}
 }
@@ -601,14 +680,94 @@ bool Cli::load_programs()
 	return true;
 }
 
+void Cli::load_menu()
+{
+	if (!m_settings.menu_hotkey().valid()) {
+		std::cout << "Menu: off (" << Settings::MENU_HOTKEY_DEFAULT
+		          << " by default; set MENU_HOTKEY in "
+		          << to_utf8(Settings::FILE_NAME) << " to turn it on).\n";
+		return;
+	}
+
+	// The menu asks the same questions 'programs', 'run' and 'abort'
+	// answer, and gets them answered the same way - it is another way in,
+	// not another set of rules.
+	MenuHooks hooks;
+	hooks.programs = [this] {
+		std::vector<std::string> names;
+		names.reserve(m_programs.size());
+		for (size_t i = 0; i < m_programs.size(); ++i)
+			names.push_back(m_programs(i).name());
+		return names;
+	};
+	hooks.running = [this] { return m_programs.current(); };
+	hooks.start   = [this](size_t program) { start_from_menu(program); };
+	hooks.abort   = [this] { abort_from_menu(); };
+	// Whatever is being captured is what a program would act on, so that
+	// is what the menu should appear over. Nothing while capture is
+	// stopped, even though the handle outlives it.
+	hooks.anchor  = [this] {
+		return m_capture.running() ? m_capture.target() : nullptr;
+	};
+
+	std::string error;
+	if (!m_menu.start(m_settings.menu_hotkey(), std::move(hooks), error)) {
+		std::cout << " [WARNING] The pop-up menu is unavailable: " << error
+		          << "\n           Everything it offers can still be typed.\n";
+		return;
+	}
+	std::cout << "Menu: press " << hotkey_text(m_settings.menu_hotkey())
+	          << " for the program list over the captured window.\n";
+}
+
+void Cli::start_from_menu(size_t program)
+{
+	if (program >= m_programs.size()) return;   // the list moved under it
+
+	if (!m_capture.running()) {
+		print_note("Capture is not running; 'start' it before running a "
+		           "program.");
+		return;
+	}
+	if (m_programs.running()) {
+		print_note("'" + m_programs.current() + "' is already running.");
+		return;
+	}
+
+	const ProgramContext context {m_images, m_detector, m_capture};
+	std::string error;
+	if (!m_programs.start(program, context, error)) {
+		print_note("   [ERROR] " + error);
+		return;
+	}
+	print_note("Started '" + m_programs(program).name() + "' from the menu.");
+}
+
+void Cli::abort_from_menu()
+{
+	if (!m_programs.running()) {
+		print_note("No program is running.");
+		return;
+	}
+	const std::string name = m_programs.current();
+	m_programs.abort();
+	print_note("Asked '" + name
+	           + "' to stop; it will finish the step it is on.");
+}
+
 void Cli::report_program(const std::string& name, const ProgramResult& result)
 {
-	// This runs on the program thread, so the console is most likely
+	print_note(
+		"[" + name + "] " + program_exit_text(result.exit) + ": "
+		+ result.description
+	);
+}
+
+void Cli::print_note(const std::string& text) const
+{
+	// This runs on somebody else's thread, so the console is most likely
 	// sitting at a prompt: start on a fresh line and put the prompt back.
-	std::cout << "\n[" << name << "] "
-	          << program_exit_text(result.exit) << ": "
-	          << result.description << "\n"
-	          << "eve> " << std::flush;
+	std::cout << "\n" << text << "\neve> " << std::flush;
 }
 
 void Cli::cmd_programs() const

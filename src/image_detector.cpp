@@ -117,17 +117,36 @@ bool ImageDetector::detect(
 	std::string&              error,
 	std::chrono::milliseconds timeout)
 {
+	return detect(
+		std::vector<std::string> {name},
+		max_hits, quick_only, result, error, timeout
+	);
+}
+
+bool ImageDetector::detect(
+	const std::vector<std::string>& names,
+	int                             max_hits,
+	bool                            quick_only,
+	Detection&                      result,
+	std::string&                    error,
+	std::chrono::milliseconds       timeout)
+{
 	if (!m_running.load()) {
 		error = "detection is not running";
 		return false;
 	}
-	const size_t image = m_library->index(name);
-	if (ImageLibrary::NOT_FOUND == image) {
-		error = "no image called '" + name + "'; the library holds: "
-		      + m_library->name_list();
-		return false;
+	std::vector<size_t> images;
+	images.reserve(names.size());
+	for (const std::string& name : names) {
+		const size_t image = m_library->index(name);
+		if (ImageLibrary::NOT_FOUND == image) {
+			error = "no image called '" + name + "'; the library holds: "
+			      + m_library->name_list();
+			return false;
+		}
+		images.push_back(image);
 	}
-	return detect(image, max_hits, quick_only, result, error, timeout);
+	return detect(images, max_hits, quick_only, result, error, timeout);
 }
 
 bool ImageDetector::detect(
@@ -138,12 +157,30 @@ bool ImageDetector::detect(
 	std::string&              error,
 	std::chrono::milliseconds timeout)
 {
+	return detect(
+		std::vector<size_t> {image},
+		max_hits, quick_only, result, error, timeout
+	);
+}
+
+bool ImageDetector::detect(
+	const std::vector<size_t>& images,
+	int                        max_hits,
+	bool                       quick_only,
+	Detection&                 result,
+	std::string&               error,
+	std::chrono::milliseconds  timeout)
+{
 	if (!m_running.load()) {
 		error = "detection is not running";
 		return false;
 	}
+	if (images.empty()) {
+		error = "no image to search for";
+		return false;
+	}
 	if (max_hits < 1) max_hits = 1;
-	const std::string& name = (*m_library)(image).name;
+	const std::string what = names_text(images);
 
 	std::lock_guard<std::mutex> caller {m_call_mutex};
 
@@ -151,7 +188,7 @@ bool ImageDetector::detect(
 	{
 		std::lock_guard<std::mutex> lock {m_mutex};
 		serial             = ++m_request_serial;
-		m_request_image    = image;
+		m_request_images   = images;
 		m_request_max_hits = max_hits;
 		m_request_quick    = quick_only;
 		m_pending          = true;
@@ -163,11 +200,11 @@ bool ImageDetector::detect(
 		return m_result_serial == serial || !m_running.load();
 	});
 	if (!answered) {
-		error = "detection of '" + name + "' timed out";
+		error = "detection of " + what + " timed out";
 		return false;
 	}
 	if (m_result_serial != serial) {
-		error = "detection stopped before '" + name + "' was searched for";
+		error = "detection stopped before " + what + " was searched for";
 		return false;
 	}
 	if (!m_result_error.empty()) {
@@ -185,17 +222,17 @@ void ImageDetector::detect_loop()
 		m_wake.wait(lock, [this] { return m_pending || !m_running.load(); });
 		if (!m_running.load()) break;
 
-		const size_t   image    = m_request_image;
-		const int      max_hits = m_request_max_hits;
-		const bool     quick    = m_request_quick;
-		const uint64_t serial   = m_request_serial;
+		const std::vector<size_t> images   = m_request_images;
+		const int                 max_hits = m_request_max_hits;
+		const bool                quick    = m_request_quick;
+		const uint64_t            serial   = m_request_serial;
 		m_pending = false;
 		lock.unlock();
 
 		Detection result;
 		std::string error;
 		try {
-			run_match(image, max_hits, quick, result, error);
+			run_match(images, max_hits, quick, result, error);
 		}
 		catch (const cv::Exception& e) {
 			error = std::string("image matching failed: ") + e.what();
@@ -213,6 +250,16 @@ void ImageDetector::detect_loop()
 	}
 	// let go of anyone still waiting on a detector that is shutting down
 	m_done.notify_all();
+}
+
+std::string ImageDetector::names_text(const std::vector<size_t>& images) const
+{
+	std::string text;
+	for (size_t at = 0; at < images.size(); ++at) {
+		if (at > 0) text += (at + 1 == images.size()) ? " or " : ", ";
+		text += "'" + (*m_library)(images[at]).name + "'";
+	}
+	return text;
 }
 
 cv::Point ImageDetector::search_margines(const ImagePattern& pattern) const
@@ -295,11 +342,13 @@ cv::Rect ImageDetector::quick_box(
 void ImageDetector::search_area(
 	const cv::Mat&             captured,
 	const cv::Rect&            area,
-	const ImagePattern&        pattern,
+	size_t                     image,
 	int                        max_hits,
 	std::vector<DetectionHit>& hits,
 	int&                       mistaken) const
 {
+	const ImagePattern& pattern = (*m_library)(image);
+
 	// Converting only the searched rectangle is what makes a quick search
 	// cheap: on an ultrawide frame the conversion alone costs more than
 	// matching a small box does.
@@ -382,7 +431,9 @@ void ImageDetector::search_area(
 		} else {
 			// matchTemplate positions are top left corners already, so a
 			// hit only moves from result into frame coordinates.
-			hits.push_back(DetectionHit {at + area.tl(), certainty, fit});
+			hits.push_back(
+				DetectionHit {image, at + area.tl(), certainty, fit}
+			);
 		}
 
 		// Blank this match either way: a rejected one left standing would
@@ -401,14 +452,12 @@ void ImageDetector::search_area(
 }
 
 void ImageDetector::run_match(
-	size_t       image,
-	int          max_hits,
-	bool         quick_only,
-	Detection&   result,
-	std::string& error) const
+	const std::vector<size_t>& images,
+	int                        max_hits,
+	bool                       quick_only,
+	Detection&                 result,
+	std::string&               error) const
 {
-	const ImagePattern& pattern = (*m_library)(image);
-
 	if (!m_capture->running()) {
 		error = "capture is not running; use 'start' first";
 		return;
@@ -428,16 +477,19 @@ void ImageDetector::run_match(
 		error = "no frame captured yet - is the window minimised?";
 		return;
 	}
-	if (pattern.width()  > static_cast<int>(frame.width) ||
-		pattern.height() > static_cast<int>(frame.height))
-	{
-		error = "pattern '" + pattern.name + "' is "
-		      + std::to_string(pattern.width()) + "x"
-		      + std::to_string(pattern.height())
-		      + ", larger than the "
-		      + std::to_string(frame.width) + "x"
-		      + std::to_string(frame.height) + " frame";
-		return;
+	for (const size_t image : images) {
+		const ImagePattern& pattern = (*m_library)(image);
+		if (pattern.width()  > static_cast<int>(frame.width) ||
+			pattern.height() > static_cast<int>(frame.height))
+		{
+			error = "pattern '" + pattern.name + "' is "
+			      + std::to_string(pattern.width()) + "x"
+			      + std::to_string(pattern.height())
+			      + ", larger than the "
+			      + std::to_string(frame.width) + "x"
+			      + std::to_string(frame.height) + " frame";
+			return;
+		}
 	}
 
 	// The frame is our own copy, so wrapping it costs nothing; the cast is
@@ -452,40 +504,83 @@ void ImageDetector::run_match(
 	};
 
 	// A box is only worth searching when the pattern is known to stay put
-	// along at least one axis and has been seen there at least once.
-	const cv::Point last  = m_library->last_hit(image);
-	const bool      boxed = ImageLibrary::boxable(pattern, last);
-	if (quick_only && !boxed) {
-		error = "no quick search for '" + pattern.name + "': it "
-		      + (FIXED_NONE == pattern.fixed_directions
-		         ? "has no FIXED_DIRECTIONS in " + to_utf8(ImageLibrary::FILE_NAME)
-		         : std::string("has not been found yet"));
+	// along at least one axis and has been seen there at least once. Each
+	// pattern answers that for itself, so a search for several of them can
+	// be quick for some and not for others.
+	result = Detection {};
+	result.searched.reserve(images.size());
+	std::string no_box;
+	for (const size_t image : images) {
+		const ImagePattern& pattern = (*m_library)(image);
+		const cv::Point     last    = m_library->last_hit(image);
+
+		PatternSearch part;
+		part.image = image;
+		if (ImageLibrary::boxable(pattern, last)) {
+			part.scope = SearchScope::BOX;
+			part.box   = quick_box(pattern, last, whole);
+		} else if (quick_only) {
+			// Skipping it would answer a question nobody asked - "is it in
+			// the boxes of the others" - and look like a complete answer.
+			if (!no_box.empty()) no_box += ", ";
+			no_box += "'" + pattern.name + "' "
+			        + (FIXED_NONE == pattern.fixed_directions
+			           ? "has no FIXED_DIRECTIONS in "
+			             + to_utf8(ImageLibrary::FILE_NAME)
+			           : std::string("has not been found yet"));
+		}
+		result.searched.push_back(part);
+	}
+	if (!no_box.empty()) {
+		error = "no quick search: " + no_box;
+		result = Detection {};
 		return;
 	}
 
-	result = Detection {};
-	if (boxed) {
-		result.box   = quick_box(pattern, last, whole);
-		result.scope = SearchScope::BOX;
-		search_area(
-			captured, result.box, pattern, max_hits,
-			result.hits, result.mistaken
-		);
-	}
-	if (result.hits.empty() && !quick_only) {
-		result.scope = boxed ? SearchScope::BOX_THEN_FULL : SearchScope::FULL;
+	// One pattern's share of the work, wherever it is being looked for.
+	std::vector<DetectionHit> found;
+	const auto look = [&](PatternSearch& part, const cv::Rect& area) {
 		int mistaken {0};
-		search_area(captured, whole, pattern, max_hits, result.hits, mistaken);
-		result.mistaken += mistaken;
+		search_area(captured, area, part.image, max_hits, found, mistaken);
+		part.mistaken += mistaken;
+		if (found.empty()) return;
+
+		// Remembering where it went is what makes the next search quick.
+		// The best match leads, so found.front() is the one to keep. A
+		// position that has not moved is not offered to the cache at all,
+		// which is most of them once the client has settled.
+		const cv::Point corner = found.front().at;
+		if (m_library->set_last_hit(part.image, corner) && m_cache)
+			m_cache->store((*m_library)(part.image), corner);
+
+		result.hits.insert(result.hits.end(), found.begin(), found.end());
+	};
+
+	// Every box before any full frame: one pattern that has moved must not
+	// cost the others their quick pass.
+	for (PatternSearch& part : result.searched)
+		if (SearchScope::BOX == part.scope) look(part, part.box);
+
+	// Nothing anywhere means the caller gets the slow answer it asked for -
+	// for all of the patterns, since any of them would do. A box that did
+	// answer spares the rest that cost: one of them was all that was asked
+	// for, and the ones left at NONE say plainly they were never looked at.
+	if (result.hits.empty() && !quick_only) {
+		for (PatternSearch& part : result.searched) {
+			part.scope = SearchScope::BOX == part.scope
+				? SearchScope::BOX_THEN_FULL : SearchScope::FULL;
+			look(part, whole);
+		}
 	}
 
-	// Remembering where it went is what makes the next search quick. The
-	// best match leads, so hits.front() is the one to keep. A position that
-	// has not moved is not offered to the cache at all, which is most of
-	// them once the client has settled.
-	if (!result.hits.empty()) {
-		const cv::Point corner = result.hits.front().at;
-		if (m_library->set_last_hit(image, corner) && m_cache)
-			m_cache->store(pattern, corner);
-	}
+	// Best first, whichever pattern it came from, and never more than were
+	// asked for: each pattern may have contributed up to max_hits.
+	std::stable_sort(
+		result.hits.begin(), result.hits.end(),
+		[](const DetectionHit& one, const DetectionHit& other) {
+			return one.certainty > other.certainty;
+		}
+	);
+	if (static_cast<int>(result.hits.size()) > max_hits)
+		result.hits.resize(static_cast<size_t>(max_hits));
 }

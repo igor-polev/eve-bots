@@ -10,6 +10,7 @@
             "NAME"            : "warp",
             "FILE"            : "msg_warp.png",
             "COMMENT"         : "Warp is active message",
+            "THRESHOLD"       : 0.8,
             "FIXED_DIRECTIONS": "XY"
         },
         {
@@ -50,6 +51,20 @@
             "COMMENT"         : "Station icon in route",
             "FIXED_DIRECTIONS": "X",
             "SIMILAR"         : [ "station" ]
+        },
+        {
+            "NAME"            : "station_home",
+            "FILE"            : "icn_station_home.png",
+            "COMMENT"         : "Home station icon",
+            "FIXED_DIRECTIONS": "X",
+            "SIMILAR"         : [ "station" ]
+        },
+        {
+            "NAME"            : "station_home_route",
+            "FILE"            : "icn_station_home_route.png",
+            "COMMENT"         : "Home station icon in route",
+            "FIXED_DIRECTIONS": "X",
+            "SIMILAR"         : [ "station_route" ]
         },
         {
             "NAME"            : "station",

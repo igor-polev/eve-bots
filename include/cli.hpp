@@ -14,6 +14,7 @@
 #include "mouse_input.hpp"
 #include "position_cache.hpp"
 #include "program.hpp"
+#include "program_menu.hpp"
 #include "program_params.hpp"
 #include "screen_capture.hpp"
 #include "settings.hpp"
@@ -49,8 +50,19 @@ private:
 	// Registers the programs and hands them their parameters. False when a
 	// parameter is unusable, which stops the application.
 	bool load_programs();
+	// Puts the pop-up menu up on its hotkey. Says what came of it and
+	// carries on either way: the menu is a convenience, and everything it
+	// offers can be typed.
+	void load_menu();
+	// What the menu clicks do. Called on the menu's thread.
+	void start_from_menu(size_t program);
+	void abort_from_menu();
+
 	// Prints the outcome of a run. Called on the program thread.
 	void report_program(const std::string& name, const ProgramResult& result);
+	// Says something from a thread that is not the console's, where the
+	// prompt is most likely already printed and waiting.
+	void print_note(const std::string& text) const;
 
 	void print_windows() const;
 	// Files the positions of the window capture has just been pointed at
@@ -72,4 +84,7 @@ private:
 	ScreenCapture           m_capture;
 	ImageDetector           m_detector;
 	ProgramRunner           m_programs;
+	// Declared last so it is torn down first: its thread calls back into
+	// the runner, which must still be here when it does.
+	ProgramMenu             m_menu;
 };

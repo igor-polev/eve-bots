@@ -106,7 +106,20 @@ protected:
 	// False means the program was asked to stop and should return.
 	bool wait(std::chrono::milliseconds duration) const;
 
-	// One search and no more.
+	// One search and no more. The list form asks for any one of several
+	// patterns in a single search - "a gate or a station", say - and says
+	// through found which one it turned out to be. That is not the same as
+	// looking for each in turn: one search shares the budget honestly
+	// between them, and the quick boxes of all of them are looked at before
+	// any of them is hunted for across the whole frame.
+	Look look_once(
+		ProgramContext&            context,
+		const std::vector<size_t>& images,
+		std::chrono::milliseconds  budget,
+		cv::Point&                 corner,
+		size_t&                    found,
+		std::string&               trouble
+	) const;
 	Look look_once(
 		ProgramContext&           context,
 		size_t                    image,
@@ -115,7 +128,16 @@ protected:
 		std::string&              trouble
 	) const;
 
-	// Repeats look_once until the pattern turns up or the budget runs out.
+	// Repeats look_once until one of the patterns turns up or the budget
+	// runs out.
+	Look look_for(
+		ProgramContext&            context,
+		const std::vector<size_t>& images,
+		std::chrono::milliseconds  budget,
+		cv::Point&                 corner,
+		size_t&                    found,
+		std::string&               trouble
+	) const;
 	Look look_for(
 		ProgramContext&           context,
 		size_t                    image,
@@ -180,9 +202,11 @@ public:
 	std::string current() const;
 
 	// Starts a program on its own thread. False when one is already
-	// running. start(), abort() and wait() belong to the console thread;
-	// m_thread is not locked, because joining under a lock the departing
-	// thread also wants would deadlock.
+	// running. start(), abort() and wait() are asked for from both the
+	// console and the pop-up menu, which are different threads, so they
+	// share a lock of their own. A run in flight never takes it - it
+	// touches only m_running, m_current and the finish handler - so
+	// joining underneath it cannot deadlock.
 	bool start(
 		size_t program, const ProgramContext& context, std::string& error
 	);
@@ -199,7 +223,8 @@ private:
 
 	FinishHandler      m_on_finish;
 	std::atomic<bool>  m_running {false};
-	std::thread        m_thread;         // console thread only
+	std::mutex         m_control_mutex;  // serialises start, abort and wait
+	std::thread        m_thread;         // only under m_control_mutex
 	mutable std::mutex m_current_mutex;  // guards m_current, nothing else
 	std::string        m_current;
 };

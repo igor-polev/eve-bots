@@ -104,13 +104,15 @@ ProgramResult AutopilotProgram::run(ProgramContext& context)
 	// Every pattern is resolved up front, so a missing one is reported
 	// before the ship is committed to anything.
 	Waypoints images;
+	size_t    station {0}, station_home {0};
 	const std::pair<const char*, size_t*> needed[] = {
-		{GATE_IMAGE,    &images.gate},
-		{STATION_IMAGE, &images.station},
-		{JUMP_IMAGE,    &images.jump},
-		{DOCK_IMAGE,    &images.dock},
-		{WARP_IMAGE,    &images.warp},
-		{UNDOCK_IMAGE,  &images.undock},
+		{GATE_IMAGE,         &images.gate},
+		{STATION_IMAGE,      &station},
+		{STATION_HOME_IMAGE, &station_home},
+		{JUMP_IMAGE,         &images.jump},
+		{DOCK_IMAGE,         &images.dock},
+		{WARP_IMAGE,         &images.warp},
+		{UNDOCK_IMAGE,       &images.undock},
 	};
 	std::string missing;
 	for (const auto& want : needed) {
@@ -125,6 +127,7 @@ ProgramResult AutopilotProgram::run(ProgramContext& context)
 		return {ProgramExit::FAILURE,
 		        "the image library has no pattern called " + missing};
 	}
+	images.stations = {station, station_home};
 
 	// 1. Get into space first. Undock succeeds without doing anything if
 	//    the ship is already out, so this costs one search when it is.
@@ -164,6 +167,10 @@ ProgramResult AutopilotProgram::fly_hop(
 	cv::Point   corner;
 	std::string trouble;
 	bool        to_station {false};
+	// Which pattern the icon turned out to be. The click below is aimed at
+	// its middle, and the station icons are not all the same size, so this
+	// has to be the one that actually matched rather than the one asked for.
+	size_t      marker {images.gate};
 
 	while (true) {
 		const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -179,7 +186,11 @@ ProgramResult AutopilotProgram::fly_hop(
 		// The gate first, because it is the common case by far.
 		Look seen = look_once(context, images.gate, left, corner, trouble);
 		if (Look::MISSING == seen) {
-			seen = look_once(context, images.station, left, corner, trouble);
+			// Either station icon will do, so both go into one search
+			// rather than costing a pass each.
+			seen = look_once(
+				context, images.stations, left, corner, marker, trouble
+			);
 			to_station = Look::FOUND == seen;
 		}
 		if (Look::FOUND == seen) break;
@@ -203,9 +214,7 @@ ProgramResult AutopilotProgram::fly_hop(
 
 	// 3. Click the waypoint, which selects it.
 	ClickResult clicked;
-	if (!click_middle(context, to_station ? images.station : images.gate,
-	                  corner, clicked, trouble))
-	{
+	if (!click_middle(context, marker, corner, clicked, trouble)) {
 		return {ProgramExit::FAILURE,
 		        hop_text(hop) + ": cannot click the " + where
 		        + " at " + point_text(corner) + ": " + trouble};

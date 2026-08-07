@@ -24,6 +24,7 @@ constexpr const char* KEY_FRAME_RATE   = "CAPTURE_FRAME_RATE_DEFAULT";
 constexpr const char* KEY_IMAGE_DIR    = "IMAGE_LIBRARY_DIR";
 constexpr const char* KEY_THRESHOLD    = "DETECT_THRESHOLD_DEFAULT";
 constexpr const char* KEY_MIN_MARGINE  = "MIN_MARGINE";
+constexpr const char* KEY_MENU_HOTKEY  = "MENU_HOTKEY";
 
 // Reads a required string setting.
 std::wstring read_string(const json& settings, const char* key)
@@ -115,6 +116,27 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		return false;
 	}
 
+	// The one setting that may be left out, since the menu came later than
+	// the file did. Spelt out rather than a key code, so it can be changed
+	// by whoever has to press it.
+	std::string spelling {MENU_HOTKEY_DEFAULT};
+	const auto typed = settings.find(KEY_MENU_HOTKEY);
+	if (settings.end() != typed) {
+		if (!typed->is_string()) {
+			error = std::string("bad setting in ") + to_utf8(path) + ": "
+			      + KEY_MENU_HOTKEY + " must be a string";
+			return false;
+		}
+		spelling = typed->get<std::string>();
+	}
+	Hotkey menu_hotkey;
+	std::string trouble;
+	if (!parse_hotkey(spelling, menu_hotkey, trouble)) {
+		error = std::string("bad setting in ") + to_utf8(path) + ": "
+		      + KEY_MENU_HOTKEY + " " + trouble;
+		return false;
+	}
+
 	// Without either criterion no window could ever match.
 	if (eve_window.class_name.empty() && eve_window.title_prefix.empty()) {
 		error = std::string("both ") + KEY_WINDOW_CLASS + " and "
@@ -150,6 +172,7 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 	m_capture_frame_rate = static_cast<unsigned>(frame_rate);
 	m_detect_threshold   = threshold;
 	m_min_margine        = static_cast<int>(min_margine);
+	m_menu_hotkey        = menu_hotkey;
 	// a relative image folder is meant relative to the settings file,
 	// not to whatever directory the app happens to be started from
 	m_image_dir          = join_path(directory_of(path), image_dir);

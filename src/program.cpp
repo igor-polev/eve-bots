@@ -85,11 +85,12 @@ bool Program::wait(std::chrono::milliseconds duration) const
 }
 
 Program::Look Program::look_once(
-	ProgramContext&           context,
-	size_t                    image,
-	std::chrono::milliseconds budget,
-	cv::Point&                corner,
-	std::string&              trouble) const
+	ProgramContext&            context,
+	const std::vector<size_t>& images,
+	std::chrono::milliseconds  budget,
+	cv::Point&                 corner,
+	size_t&                    found,
+	std::string&               trouble) const
 {
 	if (stopping()) return Look::STOPPED;
 	if (budget <= std::chrono::milliseconds::zero()) return Look::MISSING;
@@ -97,16 +98,54 @@ Program::Look Program::look_once(
 	// The search gets what is left of the budget and no more, so one slow
 	// full frame pass cannot overrun the whole timeout.
 	const ProgramClock::time_point began = ProgramClock::now();
-	Detection found;
-	if (!context.detector.detect(image, 1, false, found, trouble, budget)) {
+	Detection seen;
+	if (!context.detector.detect(images, 1, false, seen, trouble, budget)) {
 		// Running out of the time it was given is not a fault, it is the
 		// answer: the pattern was not there within the budget.
 		return since(began) >= budget ? Look::MISSING : Look::TROUBLE;
 	}
-	if (found.hits.empty()) return Look::MISSING;
+	if (seen.hits.empty()) return Look::MISSING;
 
-	corner = found.hits.front().at;
+	corner = seen.hits.front().at;
+	found  = seen.hits.front().image;
 	return Look::FOUND;
+}
+
+Program::Look Program::look_once(
+	ProgramContext&           context,
+	size_t                    image,
+	std::chrono::milliseconds budget,
+	cv::Point&                corner,
+	std::string&              trouble) const
+{
+	size_t found {0};
+	return look_once(
+		context, std::vector<size_t> {image}, budget, corner, found, trouble
+	);
+}
+
+Program::Look Program::look_for(
+	ProgramContext&            context,
+	const std::vector<size_t>& images,
+	std::chrono::milliseconds  budget,
+	cv::Point&                 corner,
+	size_t&                    found,
+	std::string&               trouble) const
+{
+	const ProgramClock::time_point deadline = ProgramClock::now() + budget;
+	while (true) {
+		const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+			deadline - ProgramClock::now()
+		);
+		if (left <= std::chrono::milliseconds::zero()) return Look::MISSING;
+
+		const Look seen =
+			look_once(context, images, left, corner, found, trouble);
+		// Only "not on screen this time" is worth another attempt.
+		if (Look::MISSING != seen) return seen;
+
+		if (!wait(RETRY_PAUSE)) return Look::STOPPED;
+	}
 }
 
 Program::Look Program::look_for(
@@ -116,19 +155,10 @@ Program::Look Program::look_for(
 	cv::Point&                corner,
 	std::string&              trouble) const
 {
-	const ProgramClock::time_point deadline = ProgramClock::now() + budget;
-	while (true) {
-		const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
-			deadline - ProgramClock::now()
-		);
-		if (left <= std::chrono::milliseconds::zero()) return Look::MISSING;
-
-		const Look seen = look_once(context, image, left, corner, trouble);
-		// Only "not on screen this time" is worth another attempt.
-		if (Look::MISSING != seen) return seen;
-
-		if (!wait(RETRY_PAUSE)) return Look::STOPPED;
-	}
+	size_t found {0};
+	return look_for(
+		context, std::vector<size_t> {image}, budget, corner, found, trouble
+	);
 }
 
 bool Program::click_middle(
@@ -201,6 +231,7 @@ void ProgramRunner::set_current(const std::string& name)
 bool ProgramRunner::start(
 	size_t program, const ProgramContext& context, std::string& error)
 {
+	std::lock_guard<std::mutex> lock {m_control_mutex};
 	if (m_running.load()) {
 		error = "'" + current() + "' is already running; abort it first";
 		return false;
@@ -234,6 +265,7 @@ bool ProgramRunner::start(
 
 void ProgramRunner::abort()
 {
+	std::lock_guard<std::mutex> lock {m_control_mutex};
 	// Every program, not just the running one: the runner does not track
 	// which is in flight, and exec() clears the flag as a run begins, so a
 	// flag left raised here cannot affect a later start().
@@ -243,5 +275,6 @@ void ProgramRunner::abort()
 
 void ProgramRunner::wait()
 {
+	std::lock_guard<std::mutex> lock {m_control_mutex};
 	if (m_thread.joinable()) m_thread.join();
 }

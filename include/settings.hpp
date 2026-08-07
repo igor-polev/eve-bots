@@ -8,11 +8,17 @@
 #pragma once
 #include <string>
 
+#include "hotkey.hpp"
 #include "window_finder.hpp"
 
 class Settings {
 public:
 	static constexpr const wchar_t* FILE_NAME = L"eve_config.json";
+
+	// What summons the pop-up program menu. The only optional setting:
+	// a file written before the menu existed still loads, and an empty
+	// string in one written since turns the menu off.
+	static constexpr const char* MENU_HOTKEY_DEFAULT = "Alt+`";
 
 	// Highest capture rate the config file may ask for.
 	static constexpr unsigned MAX_FRAME_RATE = 240;
@@ -41,9 +47,12 @@ public:
 	// under a FIXED_DIRECTIONS margin, and the room a candidate is allowed
 	// when it is weighed against the patterns it could be confused with.
 	int min_margine() const noexcept { return m_min_margine; }
+	// Invalid when the file asked for no menu.
+	const Hotkey& menu_hotkey() const noexcept { return m_menu_hotkey; }
 
 private:
 	std::wstring   m_source;
+	Hotkey         m_menu_hotkey;
 	EveWindowMatch m_eve_window;
 	unsigned       m_capture_frame_rate {0};
 	std::wstring   m_image_dir;
