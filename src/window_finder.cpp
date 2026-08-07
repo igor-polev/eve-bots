@@ -88,6 +88,21 @@ bool is_eve_window(const WindowInfo& info, const EveWindowMatch& match)
 	return false;
 }
 
+std::wstring eve_character_name(
+	const std::wstring& title, const std::wstring& prefix)
+{
+	std::wstring name {title};
+	// The same case insensitive test is_eve_window() matches the prefix by,
+	// so a title accepted there is stripped here.
+	if (!prefix.empty() && starts_with(to_lower(name), to_lower(prefix)))
+		name.erase(0, prefix.size());
+
+	const size_t first = name.find_first_not_of(L" \t");
+	const size_t last  = name.find_last_not_of(L" \t");
+	if (std::wstring::npos == first) return title;   // prefix and nothing else
+	return name.substr(first, last - first + 1);
+}
+
 std::vector<WindowInfo> find_all_windows()
 {
 	std::vector<WindowInfo> windows;

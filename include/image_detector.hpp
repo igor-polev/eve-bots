@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "image_library.hpp"
+#include "position_cache.hpp"
 #include "screen_capture.hpp"
 
 struct DetectionHit {
@@ -75,6 +76,12 @@ public:
 	// usable if nobody does.
 	void set_min_margine(int pixels) noexcept { m_min_margine = pixels; }
 	int  min_margine() const noexcept { return m_min_margine; }
+
+	// Where found positions are written so the next session starts with
+	// them. Optional; without one the detector still remembers positions
+	// for as long as it runs. Set before start(); the cache must outlive
+	// the detector.
+	void set_cache(PositionCache* cache) noexcept { m_cache = cache; }
 
 	// Slack in pixels along each axis for one pattern: its own fraction
 	// where it named one, MIN_MARGINE where it did not.
@@ -167,6 +174,7 @@ private:
 
 	ImageLibrary*        m_library {nullptr};
 	const ScreenCapture* m_capture {nullptr};
+	PositionCache*       m_cache   {nullptr};
 	int                  m_min_margine {4};
 
 	std::atomic<bool>       m_running       {false};

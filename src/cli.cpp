@@ -33,7 +33,8 @@ constexpr const char* HELP_TEXT =
 	"                      'find' listing; n may be omitted when exactly\n"
 	"                      one window was found\n"
 	"    stop              stop screen capture\n"
-	"    status            show capture state and frame counter\n"
+	"    status            show capture state, frame counter and which\n"
+	"                      client's remembered positions are in use\n"
 	"    dump [file.png]   write the current frame to a PNG file\n"
 	"    images            list the patterns loaded from eve_images.json\n"
 	"    detect <image> [n] [quick]\n"
@@ -120,6 +121,18 @@ std::string certainty_text(double value)
 	return text.str();
 }
 
+// "1214,346", or "1214,?" when only one coordinate is known - which is
+// what the position cache hands back for a pattern that holds still along
+// one axis only.
+std::string corner_text(const cv::Point& corner)
+{
+	const auto axis = [](int value) {
+		return value > ImageLibrary::UNKNOWN
+			? std::to_string(value) : std::string("?");
+	};
+	return axis(corner.x) + "," + axis(corner.y);
+}
+
 // "a 302x88 box at 3113,300" - where a search actually looked.
 std::string box_text(const cv::Rect& box)
 {
@@ -166,6 +179,7 @@ int Cli::run()
 
 	std::string error;
 	m_detector.set_min_margine(m_settings.min_margine());
+	m_detector.set_cache(&m_positions);
 	if (!m_detector.start(m_images, m_capture, error)) {
 		std::cout << " [WARNING] Image detection is unavailable: "
 		          << error << "\n";
@@ -323,6 +337,44 @@ void Cli::cmd_start(const std::vector<std::string>& args)
 	std::cout << "Capture started on [" << index << "] "
 	          << to_utf8(target.title)
 	          << " at " << m_settings.capture_frame_rate() << " fps\n";
+	follow_positions(target);
+}
+
+void Cli::follow_positions(const WindowInfo& target)
+{
+	// Cached positions belong to a frame size, so the frame itself has to
+	// say what that is - the window has several plausible rectangles and
+	// only one of them is what detections are measured in. The first frame
+	// lands a few milliseconds after 'start'.
+	Frame frame = m_capture.latest_frame();
+	for (int wait = 0; frame.empty() && wait < FRAME_WAIT_STEPS; ++wait) {
+		std::this_thread::sleep_for(FRAME_WAIT_STEP);
+		frame = m_capture.latest_frame();
+	}
+	if (frame.empty()) {
+		std::cout << " [WARNING] No frame yet, so positions cannot be "
+		             "restored or remembered; 'stop' and 'start' again once "
+		             "the window is drawing.\n";
+		return;
+	}
+
+	const std::string character = to_utf8(
+		eve_character_name(target.title, m_settings.eve_window().title_prefix)
+	);
+	const PositionCache::Follow followed = m_positions.follow(
+		m_images, character,
+		static_cast<int>(frame.width), static_cast<int>(frame.height)
+	);
+	if (!followed.changed) return;   // same client, nothing moved
+
+	std::cout << "Positions: '" << character << "' at "
+	          << frame.width << "x" << frame.height << ", ";
+	if (followed.restored > 0)
+		std::cout << followed.restored << " restored from "
+		          << to_utf8(m_positions.source_path()) << "\n";
+	else
+		std::cout << "none remembered yet; the first search of each pattern "
+		             "scans the whole frame\n";
 }
 
 void Cli::cmd_stop()
@@ -339,18 +391,21 @@ void Cli::cmd_status() const
 {
 	if (!m_capture.running()) {
 		std::cout << "Capture: stopped.\n";
-		return;
+	} else {
+		const Frame frame = m_capture.latest_frame();
+		std::cout << "Capture: running at " << m_capture.frame_rate()
+		          << " fps, " << m_capture.frame_count()
+		          << " frames grabbed (" << m_capture.arrived_count()
+		          << " delivered by the window).\n";
+		if (frame.empty())
+			std::cout << "Last frame: none yet.\n";
+		else
+			std::cout << "Last frame: "
+			          << frame.width << "x" << frame.height << "\n";
 	}
-	const Frame frame = m_capture.latest_frame();
-	std::cout << "Capture: running at " << m_capture.frame_rate() << " fps, "
-	          << m_capture.frame_count() << " frames grabbed ("
-	          << m_capture.arrived_count()
-	          << " delivered by the window).\n";
-	if (frame.empty())
-		std::cout << "Last frame: none yet.\n";
-	else
-		std::cout << "Last frame: "
-		          << frame.width << "x" << frame.height << "\n";
+	// The cache is written from the detection thread, which has no polite
+	// way to interrupt the console, so this is where trouble with it shows.
+	std::cout << "Positions: " << m_positions.state_text() << "\n";
 }
 
 void Cli::cmd_dump(const std::vector<std::string>& args) const
@@ -408,7 +463,7 @@ void Cli::cmd_images() const
 		          << ", fixed " << fixed_directions_text(pattern.fixed_directions)
 		          << ", margines " << margines.x << "x" << margines.y;
 		if (ImageLibrary::seen(last))
-			std::cout << ", last seen at " << last.x << "," << last.y;
+			std::cout << ", last seen at " << corner_text(last);
 		std::cout << "\n";
 		if (!pattern.similar.empty()) {
 			std::cout << "      similar to";
@@ -694,8 +749,10 @@ void Cli::cmd_click(const std::vector<std::string>& args)
 		cv::Point           corner  = m_images.last_hit(image);
 
 		// 'refresh' asks for a search outright; without it one happens only
-		// when there is nothing remembered to click.
-		if (refresh || !ImageLibrary::seen(corner)) {
+		// when there is nothing to aim at. Half a corner - all the position
+		// cache keeps for a pattern fixed along one axis - is not enough:
+		// the other coordinate has to be found before anything is clicked.
+		if (refresh || !ImageLibrary::located(corner)) {
 			if (!find && !refresh) {
 				std::cout << "'" << pattern.name << "' has not been detected "
 				             "yet; run 'detect' first, or drop 'nofind'.\n";

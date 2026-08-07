@@ -475,6 +475,12 @@ bool ImageLibrary::set_last_hit(size_t image, const cv::Point& corner)
 	return true;
 }
 
+void ImageLibrary::forget_hits()
+{
+	std::lock_guard<std::mutex> lock {m_hits_mutex};
+	m_last_hits.assign(m_patterns.size(), NEVER_SEEN);
+}
+
 std::string fixed_directions_text(unsigned directions)
 {
 	std::string text;

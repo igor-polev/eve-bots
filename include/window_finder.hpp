@@ -32,3 +32,11 @@ std::vector<WindowInfo> find_eve_windows(const EveWindowMatch& match);
 
 // True if the window matches the given criteria.
 bool is_eve_window(const WindowInfo& info, const EveWindowMatch& match);
+
+// Who is logged in, taken from the window title: EVE puts the character
+// name after the configured prefix, as in "EVE - Jane Doe". A title that
+// does not start with the prefix is returned whole - it still tells one
+// client from another, which is all this is used for.
+std::wstring eve_character_name(
+	const std::wstring& title, const std::wstring& prefix
+);

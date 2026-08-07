@@ -12,6 +12,7 @@
 #include "image_detector.hpp"
 #include "image_library.hpp"
 #include "mouse_input.hpp"
+#include "position_cache.hpp"
 #include "program.hpp"
 #include "program_params.hpp"
 #include "screen_capture.hpp"
@@ -20,10 +21,11 @@
 
 class Cli {
 public:
-	// settings, images and params must outlive the Cli object.
+	// All four must outlive the Cli object.
 	Cli(const Settings& settings, ImageLibrary& images,
-	    const ProgramParams& params)
-		: m_settings {settings}, m_images {images}, m_params {params} {}
+	    const ProgramParams& params, PositionCache& positions)
+		: m_settings {settings}, m_images {images}, m_params {params},
+		  m_positions {positions} {}
 
 	// Reads and dispatches commands until 'exit'. Returns process exit code.
 	int run();
@@ -51,6 +53,10 @@ private:
 	void report_program(const std::string& name, const ProgramResult& result);
 
 	void print_windows() const;
+	// Files the positions of the window capture has just been pointed at
+	// under whoever is logged in there, and hands back what was remembered
+	// for that client last time. Prints what it did.
+	void follow_positions(const WindowInfo& target);
 	// Turns a command line token into a library position, taking either a
 	// name or the index 'images' prints. NOT_FOUND when it is neither, the
 	// complaint having already been printed.
@@ -59,6 +65,7 @@ private:
 	const Settings&      m_settings;
 	ImageLibrary&        m_images;
 	const ProgramParams& m_params;
+	PositionCache&       m_positions;
 
 	// Result of the last 'find', so 'start <n>' can refer to it.
 	std::vector<WindowInfo> m_windows;

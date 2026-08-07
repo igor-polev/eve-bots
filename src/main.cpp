@@ -14,6 +14,8 @@
 
 #include "cli.hpp"
 #include "image_library.hpp"
+#include "paths.hpp"
+#include "position_cache.hpp"
 #include "program_params.hpp"
 #include "settings.hpp"
 #include "text_util.hpp"
@@ -68,7 +70,26 @@ int main()
 			             "defaults.\n";
 		}
 
-		Cli cli {settings, images, params};
+		// Where patterns were last seen. Kept beside the settings file, so
+		// it lands wherever the bot was installed rather than in whatever
+		// directory it happened to be launched from. Unlike the other three
+		// files this one is written by us and regenerates itself in a
+		// detection apiece, so a broken one is worth a word but not a
+		// refusal to start.
+		PositionCache positions;
+		if (!positions.load(
+				join_path(
+					directory_of(settings.source_path()),
+					PositionCache::FILE_NAME
+				),
+				error))
+		{
+			std::cout << " [WARNING] " << error
+			          << "\n           Positions will be learnt afresh and "
+			             "the file rewritten.\n";
+		}
+
+		Cli cli {settings, images, params, positions};
 		return cli.run();
 	}
 	catch (const winrt::hresult_error& e) {

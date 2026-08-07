@@ -452,10 +452,9 @@ void ImageDetector::run_match(
 	};
 
 	// A box is only worth searching when the pattern is known to stay put
-	// along at least one axis and has been seen at least once.
+	// along at least one axis and has been seen there at least once.
 	const cv::Point last  = m_library->last_hit(image);
-	const bool      boxed = FIXED_NONE != pattern.fixed_directions
-	                     && ImageLibrary::seen(last);
+	const bool      boxed = ImageLibrary::boxable(pattern, last);
 	if (quick_only && !boxed) {
 		error = "no quick search for '" + pattern.name + "': it "
 		      + (FIXED_NONE == pattern.fixed_directions
@@ -481,7 +480,12 @@ void ImageDetector::run_match(
 	}
 
 	// Remembering where it went is what makes the next search quick. The
-	// best match leads, so hits.front() is the one to keep.
-	if (!result.hits.empty())
-		m_library->set_last_hit(image, result.hits.front().at);
+	// best match leads, so hits.front() is the one to keep. A position that
+	// has not moved is not offered to the cache at all, which is most of
+	// them once the client has settled.
+	if (!result.hits.empty()) {
+		const cv::Point corner = result.hits.front().at;
+		if (m_library->set_last_hit(image, corner) && m_cache)
+			m_cache->store(pattern, corner);
+	}
 }

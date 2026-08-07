@@ -93,11 +93,35 @@ public:
 	// index() answers this when there is no pattern by that name.
 	static constexpr size_t NOT_FOUND = static_cast<size_t>(-1);
 
-	// Stands for a pattern that has never been found. A real hit is the top
-	// left corner of a match, so it can be 0,0 but never negative.
-	inline static const cv::Point NEVER_SEEN {-1, -1};
+	// A coordinate nothing is known about. A hit is the top left corner of
+	// a match, so a real one can be 0 but never negative.
+	static constexpr int UNKNOWN = -1;
+	// Stands for a pattern that has never been found.
+	inline static const cv::Point NEVER_SEEN {UNKNOWN, UNKNOWN};
+
+	// True when anything at all is remembered. Half a corner is possible:
+	// the position cache keeps only the axes a pattern holds still along,
+	// so a position restored at startup may name just one of them.
 	static bool seen(const cv::Point& corner) noexcept
-		{ return corner.x >= 0; }
+		{ return corner.x > UNKNOWN || corner.y > UNKNOWN; }
+
+	// True when the whole corner is known - what it takes to aim at a
+	// pattern, as opposed to merely searching near it.
+	static bool located(const cv::Point& corner) noexcept
+		{ return corner.x > UNKNOWN && corner.y > UNKNOWN; }
+
+	// True when a quick search has what it needs: the pattern keeps its
+	// place along at least one axis, and every axis it keeps is known. The
+	// others are never read, so half a corner is enough for a pattern that
+	// only holds still along one axis.
+	static bool boxable(
+		const ImagePattern& pattern, const cv::Point& corner) noexcept
+	{
+		if (FIXED_NONE == pattern.fixed_directions)            return false;
+		if (pattern.fixed_x() && corner.x <= UNKNOWN)          return false;
+		if (pattern.fixed_y() && corner.y <= UNKNOWN)          return false;
+		return true;
+	}
 
 	// Looks for FILE_NAME in the working directory, then next to the
 	// executable, and reads every PNG it names from dir.
@@ -165,6 +189,10 @@ public:
 		const size_t image = index(name);
 		return NOT_FOUND != image && set_last_hit(image, corner);
 	}
+
+	// Throws away every remembered position. Used when capture moves to a
+	// different client, whose panels are somewhere else entirely.
+	void forget_hits();
 
 private:
 	// Resolves every SIMILAR name to a position, makes the relation

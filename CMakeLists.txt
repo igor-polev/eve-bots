@@ -18,6 +18,7 @@ add_executable(${PROJECT_NAME}
     src/png_writer.cpp
     src/image_library.cpp
     src/image_detector.cpp
+    src/position_cache.cpp
     src/mouse_input.cpp
     src/program_params.cpp
     src/program.cpp

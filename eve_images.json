@@ -27,6 +27,7 @@
         {
             "NAME"            : "shipcore",
             "FILE"            : "ui_ship_core.png",
+            "THRESHOLD"       : 0.8,
             "COMMENT"         : "Main ship control unit in space",
             "FIXED_DIRECTIONS": "XY"
         },

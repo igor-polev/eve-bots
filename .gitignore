@@ -7,6 +7,10 @@ compile_commands.json
 # screen dumps produced by the 'dump' command
 eve_dump_*.png
 
+# where patterns were last seen - written at runtime, and true only of the
+# machine and the client it was written on
+eve_positions.json
+
 .vscode/*
 !.vscode/settings.json
 !.vscode/launch.json
