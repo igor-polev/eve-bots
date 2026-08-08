@@ -51,10 +51,8 @@ constexpr const char* HELP_TEXT =
 	"    click <image> [options]\n"
 	"    click <x> <y> [options]\n"
 	"                      click the middle of a pattern, or a bare point in\n"
-	"                      frame coordinates. 'confirm=<image>' makes the\n"
-	"                      click wait for proof that the game took it and\n"
-	"                      click again if it did not; see 'click' with no\n"
-	"                      arguments for that and the rest of the options\n"
+	"                      frame coordinates; see 'click' with no arguments\n"
+	"                      for the options\n"
 	"    programs          list the programs and the parameters they will use\n"
 	"    run <program>     start a program on its own thread; the console\n"
 	"                      stays usable and the outcome is printed when it\n"
@@ -77,22 +75,9 @@ constexpr const char* CLICK_USAGE =
 	"                (the default); nofind fails instead\n"
 	"    refresh     search again even though a position is remembered;\n"
 	"                norefresh reuses it (the default)\n"
-	"    wait_ms=<n> sleep after the click so the game can react, "
-	                 "20 by default\n"
-	"    confirm=<image>[,<image>...]\n"
-	"                what the click is supposed to bring about. After the\n"
-	"                click these are searched for until one turns up; any\n"
-	"                of them will do. Without this the click is made and\n"
-	"                not checked\n"
-	"    confirm_ms=<n>\n"
-	"                how long to keep looking after each click. Every\n"
-	"                attempt gets this in full\n"
-	"    retries=<n> further clicks to make when one goes unconfirmed\n"
-	"'confirm_ms' and 'retries' default to CONFIRM_TIMEOUT_DEFAULT and\n"
-	"ACTION_RETRIES_DEFAULT from the settings file, which is what the\n"
-	"programs confirm their own clicks with.\n"
-	"'find' and 'refresh' do not apply to clicking a bare point.\n"
-	"'confirm_ms' and 'retries' mean nothing without 'confirm'.\n";
+	"Nothing here checks that the click did anything: this is for trying a\n"
+	"pattern out by hand. A program's clicks insist on being confirmed.\n"
+	"'find' and 'refresh' do not apply to clicking a bare point.\n";
 
 std::vector<std::string> tokenize(const std::string& line)
 {
@@ -884,21 +869,9 @@ void Cli::cmd_click(const std::vector<std::string>& args)
 		first_option = 2;
 	}
 
-	// The same three numbers the programs click with, so what is tried by
-	// hand here behaves the way it will once a program does it.
-	const ProgramDefaults& usual = m_settings.program_defaults();
-
 	bool find    {true};
 	bool refresh {false};
-	int  wait_ms {UI_WAIT_DEFAULT};
 	bool chosen  {false};   // find or refresh named explicitly
-
-	// Pattern names are taken from the untouched argument, not the lowered
-	// copy the options are matched against: the library is spelt exactly.
-	std::vector<std::string> confirm_names;
-	int  confirm_ms {static_cast<int>(usual.CONFIRM_TIMEOUT.count())};
-	int  retries    {usual.ACTION_RETRIES};
-	bool insisted   {false};   // confirm_ms or retries named explicitly
 
 	for (size_t i = first_option; i < args.size(); ++i) {
 		const std::string option = to_lower(args[i]);
@@ -906,70 +879,16 @@ void Cli::cmd_click(const std::vector<std::string>& args)
 		else if ("nofind"  == option) { find    = false; chosen = true; }
 		else if ("refresh" == option) { refresh = true;  chosen = true; }
 		else if ("norefresh" == option) { refresh = false; chosen = true; }
-		else if (0 == option.compare(0, 8, "wait_ms=")) {
-			if (!parse_int(option.substr(8), wait_ms) || wait_ms < 0) {
-				std::cout << "Not a wait in milliseconds: " << args[i] << "\n";
-				return;
-			}
-		}
-		else if (0 == option.compare(0, 8, "confirm=")) {
-			confirm_names = split_commas(args[i].substr(8));
-			if (confirm_names.empty()) {
-				std::cout << "'confirm=' names no image.\n";
-				return;
-			}
-		}
-		else if (0 == option.compare(0, 11, "confirm_ms=")) {
-			if (!parse_int(option.substr(11), confirm_ms) || confirm_ms < 1) {
-				std::cout << "Not a confirmation timeout in milliseconds: "
-				          << args[i] << "\n";
-				return;
-			}
-			insisted = true;
-		}
-		else if (0 == option.compare(0, 8, "retries=")) {
-			if (!parse_int(option.substr(8), retries) || retries < 0) {
-				std::cout << "Not a number of retries: " << args[i] << "\n";
-				return;
-			}
-			insisted = true;
-		}
 		else {
 			std::cout << "Unknown click option: " << args[i] << "\n"
 			          << CLICK_USAGE;
 			return;
-
 		}
 	}
 
 	if (point && chosen) {
 		std::cout << "'find' and 'refresh' only apply to clicking an image.\n";
 		return;
-	}
-	// Both only say how hard to insist on a confirmation, so neither means
-	// anything without something to be confirmed by.
-	if (insisted && confirm_names.empty()) {
-		std::cout << "'confirm_ms' and 'retries' need 'confirm=<image>' to "
-		             "say what the click is supposed to bring about.\n";
-		return;
-	}
-
-	// Resolved before the click rather than after it, so a mistyped name
-	// costs nothing: a click cannot be taken back.
-	ClickConfirm confirm;
-	confirm.timeout = std::chrono::milliseconds {confirm_ms};
-	confirm.retries = retries;
-	for (const std::string& token : confirm_names) {
-		const size_t image = resolve_image(token);
-		if (ImageLibrary::NOT_FOUND == image) return;
-		if (confirm.images.end() != std::find(
-				confirm.images.begin(), confirm.images.end(), image))
-		{
-			std::cout << "'" << m_images(image).name
-			          << "' is in the confirm list twice.\n";
-			return;
-		}
-		confirm.images.push_back(image);
 	}
 	if (!m_capture.running()) {
 		std::cout << "Capture is not running; use 'start' first.\n";
@@ -1012,48 +931,14 @@ void Cli::cmd_click(const std::vector<std::string>& args)
 		// person would aim at
 		target = corner
 		       + cv::Point {pattern.width() / 2, pattern.height() / 2};
-		what   = "'" + pattern.name + "' at ";
+		what   = " '" + pattern.name + "'";
 	}
 
-	ProgramContext context {
-		m_images, m_detector, m_capture, m_settings.program_defaults()
-	};
-	ClickReport    report;
-	std::string    error;
-	const Click outcome = confirmed_click(
-		context, target, wait_ms, confirm, StopCheck {}, report, error
-	);
-	// Nothing was clicked, or the search after it could not run. Either
-	// way there is no click to describe.
-	if (Click::TROUBLE == outcome && 0 == report.clicks) {
+	ClickResult clicked;
+	std::string error;
+	if (!click_at(m_capture.target(), target, UI_WAIT_DEFAULT, clicked, error)) {
 		std::cout << "   [ERROR] " << error << "\n";
 		return;
 	}
-
-	std::cout << "Clicked " << what
-	          << "frame " << report.click.frame.x << "," << report.click.frame.y
-	          << " -> screen " << report.click.screen.x << ","
-	          << report.click.screen.y;
-	if (report.clicks > 1)       std::cout << ", " << report.clicks << " times";
-	if (report.click.activated)  std::cout << ", raised the window";
-	if (report.click.restored)   std::cout << ", put the focus back";
-	if (wait_ms > 0)             std::cout << ", waited " << wait_ms << " ms";
-	std::cout << "\n";
-
-	switch (outcome) {
-	case Click::CONFIRMED:
-		std::cout << "  confirmed by '" << m_images(report.image).name
-		          << "' at " << point_text(report.at)
-		          << " after " << seconds_text(report.spent) << "\n";
-		break;
-	case Click::UNCONFIRMED:
-		std::cout << "  NOT confirmed: " << error
-		          << " (" << seconds_text(report.spent) << ")\n";
-		break;
-	case Click::TROUBLE:
-		std::cout << "   [ERROR] " << error << "\n";
-		break;
-	default:
-		break;   // a plain click, which the line above has already said
-	}
+	std::cout << "Clicked" << what << ".\n";
 }

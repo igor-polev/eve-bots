@@ -6,12 +6,60 @@
 */
 
 #include <algorithm>
-#include <iomanip>
-#include <sstream>
 
 #include "program.hpp"
 
 namespace {
+
+// What looking for one pattern ended in.
+enum class Look {
+	FOUND,
+	MISSING,   // not on screen within the budget - an answer, not a fault
+	STOPPED,
+	TROUBLE    // the search itself could not run
+};
+
+// Whether whoever asked for something wants it given up on.
+using StopCheck = std::function<bool()>;
+
+// What a click has to produce before it counts, and how hard to insist.
+//
+// A click that lands is not a click that worked. The interface may be
+// busy, the button may still be drawing itself, the game may drop a
+// press that falls between two rendered frames - and none of that looks
+// any different from success at the moment the button goes down. The
+// only way to know is to look for whatever the click was supposed to
+// bring about, so that is what this names.
+struct ClickConfirm {
+	// Any one of these appearing is proof enough: they are alternatives,
+	// the way a search for several patterns always is. Empty asks for no
+	// confirmation, which leaves a plain click.
+	std::vector<size_t>       images;
+	// How long to keep looking after each click. Each attempt gets this
+	// in full, so the whole thing can take (retries + 1) times as long.
+	std::chrono::milliseconds timeout {0};
+	// Further clicks to make when one goes unconfirmed. 0 means click
+	// once and report whether it showed.
+	int                       retries {0};
+
+	bool wanted() const noexcept { return !images.empty(); }
+};
+
+enum class Click {
+	CONFIRMED,     // clicked, and the game showed it had been taken
+	DONE,          // clicked, and no confirmation was asked for
+	UNCONFIRMED,   // every allowed click was made and none of them showed
+	STOPPED,
+	TROUBLE        // the click, or the search after it, could not be done
+};
+
+// What a click came to, whether or not it was confirmed.
+struct ClickReport {
+	ClickResult click;            // the last click that was made
+	int         clicks {0};       // how many were made in all
+	cv::Point   at;               // where the confirmation was seen
+	size_t      image {0};        // which pattern it turned out to be
+};
 
 // A program sleeping between attempts checks for a stop this often.
 constexpr std::chrono::milliseconds WAIT_STEP {50};
@@ -100,6 +148,63 @@ Look keep_looking(
 	}
 }
 
+// Clicks a point of the captured window and, when a confirmation was
+// asked for, waits for proof that the game took it - clicking again up
+// to retries times when none arrives.
+//
+// error is filled for TROUBLE and for UNCONFIRMED, since both are things
+// the caller will want to say out loud; the other outcomes leave it
+// alone. stopping may be empty, and is then never asked.
+Click confirmed_click(
+	ProgramContext&     context,
+	const cv::Point&    target,
+	int                 wait_ms,
+	const ClickConfirm& confirm,
+	const StopCheck&    stopping,
+	ClickReport&        report,
+	std::string&        error)
+{
+	report = ClickReport {};
+
+	// The first click, plus however many further ones were allowed. A
+	// negative retry count is read as none rather than refused: it can
+	// only have come from arithmetic, and one click is what it meant.
+	const int attempts = 1 + std::max(0, confirm.retries);
+	for (int attempt = 0; attempt < attempts; ++attempt) {
+		if (asked_to_stop(stopping)) return Click::STOPPED;
+
+		if (!click_at(
+				context.capture.target(), target, wait_ms,
+				report.click, error))
+		{
+			// Clicking failed outright - the window is gone, or something
+			// is covering the point. Another attempt would fail the same
+			// way, so this is not what the retries are for.
+			return Click::TROUBLE;
+		}
+		++report.clicks;
+
+		// Nothing to wait for: the click was made, and that was all that
+		// was asked of it.
+		if (!confirm.wanted()) return Click::DONE;
+
+		const Look seen = keep_looking(
+			context, confirm.images, confirm.timeout, stopping,
+			report.at, report.image, error
+		);
+		switch (seen) {
+		case Look::FOUND:   return Click::CONFIRMED;
+		case Look::STOPPED: return Click::STOPPED;
+		case Look::TROUBLE: return Click::TROUBLE;
+		default:            break;   // not there yet, so click again
+		}
+	}
+
+	error = context.detector.names_text(confirm.images)
+	      + " did not follow";
+	return Click::UNCONFIRMED;
+}
+
 } // namespace
 
 std::chrono::milliseconds since(ProgramClock::time_point start)
@@ -107,19 +212,6 @@ std::chrono::milliseconds since(ProgramClock::time_point start)
 	return std::chrono::duration_cast<std::chrono::milliseconds>(
 		ProgramClock::now() - start
 	);
-}
-
-std::string seconds_text(std::chrono::milliseconds spent)
-{
-	std::ostringstream text;
-	text << std::fixed << std::setprecision(1)
-	     << (spent.count() / 1000.0) << " s";
-	return text.str();
-}
-
-std::string point_text(const cv::Point& at)
-{
-	return std::to_string(at.x) + "," + std::to_string(at.y);
 }
 
 std::string program_exit_text(ProgramExit exit)
@@ -298,18 +390,12 @@ bool Program::prepare(std::string&)
 	return true;
 }
 
-std::chrono::milliseconds Program::elapsed() const
-{
-	return since(m_started);
-}
-
 ProgramResult Program::exec(ProgramContext& context)
 {
 	// A previous run may have been aborted; this one starts clean.
 	m_stop.store(false);
 	m_notes.clear();
 	m_context = &context;
-	m_started = ProgramClock::now();
 	try {
 		if (!context.capture.running()) {
 			return {ProgramExit::FAILURE,
@@ -405,9 +491,7 @@ void Program::pause(const Interval& duration, const std::string& what) const
 Program::Sighting Program::watch_for(
 	const std::string&         what,
 	const std::vector<size_t>& images,
-	std::chrono::milliseconds  budget,
-	std::chrono::milliseconds  reported,
-	const std::string&         hint) const
+	std::chrono::milliseconds  budget) const
 {
 	Sighting    seen;
 	std::string trouble;
@@ -418,37 +502,29 @@ Program::Sighting Program::watch_for(
 	if (Look::FOUND == looked)   return seen;
 	if (Look::STOPPED == looked) stopped_while("waiting for " + what);
 	if (Look::TROUBLE == looked) fail("cannot look for " + what + ": " + trouble);
-	fail(what + " did not appear within " + seconds_text(reported)
-	     + (hint.empty() ? std::string {} : " - " + hint));
+	fail(what + " did not appear");
 }
 
 cv::Point Program::appear(
 	const std::string&        what,
 	size_t                    image,
-	std::chrono::milliseconds budget,
-	const std::string&        hint) const
+	std::chrono::milliseconds budget) const
 {
-	return watch_for(what, std::vector<size_t> {image}, budget, budget, hint).at;
+	return watch_for(what, std::vector<size_t> {image}, budget).at;
 }
 
 cv::Point Program::appear(
-	const std::string& what,
-	size_t             image,
-	const Budget&      budget,
-	const std::string& hint) const
+	const std::string& what, size_t image, const Budget& budget) const
 {
-	return watch_for(
-		what, std::vector<size_t> {image}, budget.left(), budget.total(), hint
-	).at;
+	return watch_for(what, std::vector<size_t> {image}, budget.left()).at;
 }
 
 Program::Sighting Program::appear(
 	const std::string&         what,
 	const std::vector<size_t>& images,
-	std::chrono::milliseconds  budget,
-	const std::string&         hint) const
+	std::chrono::milliseconds  budget) const
 {
-	return watch_for(what, images, budget, budget, hint);
+	return watch_for(what, images, budget);
 }
 
 void Program::vanish(
@@ -461,10 +537,8 @@ void Program::vanish(
 		rest_or_stop(recheck.value(), what + " to go");
 
 		const std::chrono::milliseconds left = budget.left();
-		if (left <= std::chrono::milliseconds::zero()) {
-			fail(what + " was still there "
-			     + seconds_text(budget.total()) + " later");
-		}
+		if (left <= std::chrono::milliseconds::zero())
+			fail(what + " never went away");
 		cv::Point at;
 		if (!sighted(what, image, left, at)) return;
 	}
@@ -525,81 +599,15 @@ cv::Point Program::click(
 	);
 	if (Click::CONFIRMED == clicked) return report.at;
 	if (Click::DONE == clicked)      return report.click.frame;
-	if (Click::STOPPED == clicked)   stopped_while("clicking " + what);
-	if (Click::UNCONFIRMED == clicked) {
-		fail(what + " at " + point_text(corner) + " did not take after "
-		     + std::to_string(report.clicks)
-		     + (1 == report.clicks ? " click: " : " clicks: ") + trouble);
-	}
-	fail("cannot click " + what + " at " + point_text(corner) + ": " + trouble);
+	if (Click::STOPPED == clicked)     stopped_while("clicking " + what);
+	if (Click::UNCONFIRMED == clicked) fail(what + " did not take: " + trouble);
+	fail("cannot click " + what + ": " + trouble);
 }
 
 cv::Point Program::click(
 	const std::string& what, size_t image, const cv::Point& corner) const
 {
 	return click(what, image, corner, std::vector<size_t> {});
-}
-
-Click confirmed_click(
-	ProgramContext&     context,
-	const cv::Point&    target,
-	int                 wait_ms,
-	const ClickConfirm& confirm,
-	const StopCheck&    stopping,
-	ClickReport&        report,
-	std::string&        error)
-{
-	const ProgramClock::time_point began = ProgramClock::now();
-	report = ClickReport {};
-
-	// The first click, plus however many further ones were allowed. A
-	// negative retry count is read as none rather than refused: it can
-	// only have come from arithmetic, and one click is what it meant.
-	const int attempts = 1 + std::max(0, confirm.retries);
-	for (int attempt = 0; attempt < attempts; ++attempt) {
-		if (asked_to_stop(stopping)) return Click::STOPPED;
-
-		if (!click_at(
-				context.capture.target(), target, wait_ms,
-				report.click, error))
-		{
-			// Clicking failed outright - the window is gone, or something
-			// is covering the point. Another attempt would fail the same
-			// way, so this is not what the retries are for.
-			report.spent = since(began);
-			return Click::TROUBLE;
-		}
-		++report.clicks;
-		report.spent = since(began);
-
-		// Nothing to wait for: the click was made, and that was all that
-		// was asked of it.
-		if (!confirm.wanted()) return Click::DONE;
-
-		const Look seen = keep_looking(
-			context, confirm.images, confirm.timeout, stopping,
-			report.at, report.image, error
-		);
-		report.spent = since(began);
-		switch (seen) {
-		case Look::FOUND:
-			report.confirmed = true;
-			return Click::CONFIRMED;
-		case Look::STOPPED:
-			return Click::STOPPED;
-		case Look::TROUBLE:
-			return Click::TROUBLE;
-		default:
-			break;   // not there yet, so click again if there is one left
-		}
-	}
-
-	report.spent = since(began);
-	error = context.detector.names_text(confirm.images)
-	      + " did not appear within " + seconds_text(confirm.timeout)
-	      + " of any of " + std::to_string(report.clicks)
-	      + (1 == report.clicks ? " click" : " clicks");
-	return Click::UNCONFIRMED;
 }
 
 ProgramRunner::~ProgramRunner()

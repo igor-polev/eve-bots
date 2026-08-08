@@ -26,36 +26,23 @@ ProgramResult UndockProgram::run()
 		// settles it without spending the whole budget retrying a button
 		// that is never going to appear.
 		cv::Point core;
-		if (sighted("the ship core", SHIPCORE, search.left(), core)) {
-			return done(
-				"already in space after " + seconds_text(elapsed())
-				+ ": no undock button, ship core at " + point_text(core)
-			);
-		}
+		if (sighted("the ship core", SHIPCORE, search.left(), core))
+			return done("already in space, nothing to undock");
 		// Neither pattern is on screen. Now late drawing is the likely
 		// explanation, so go back to the button and keep trying.
-		corner = appear(
-			"the undock button", UNDOCK, search,
-			"the ship core was not there either - is the client on a loading "
-			"screen, or are the patterns cut at a different resolution?"
-		);
+		corner = appear("the undock button", UNDOCK, search);
 	}
 
 	// Click the middle of it, and give the game long enough to take the
 	// click - not to finish undocking, which is what the wait below is
 	// for.
-	const cv::Point target = click("the undock button", UNDOCK, corner);
-	const Budget    out {IN_SPACE_TIMEOUT};
+	click("the undock button", UNDOCK, corner);
+	const Budget out {IN_SPACE_TIMEOUT};
 	pause(UNDOCK_CLICK_PAUSE, "the click to be taken");
 
 	// The ship core is what says the ship made it out. Whatever the click
 	// and the pause already used comes off the budget.
-	const cv::Point core =
-		appear("the ship core", SHIPCORE, out, "did the click register?");
+	appear("the ship core", SHIPCORE, out);
 
-	return done(
-		"undocked in " + seconds_text(elapsed())
-		+ ": clicked " + point_text(target)
-		+ ", ship core at " + point_text(core)
-	);
+	return done("undocked");
 }

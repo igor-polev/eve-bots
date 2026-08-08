@@ -56,10 +56,6 @@ using ProgramClock = std::chrono::steady_clock;
 
 // How long ago something happened.
 std::chrono::milliseconds since(ProgramClock::time_point start);
-// "4.2 s"
-std::string seconds_text(std::chrono::milliseconds spent);
-// "789,1245"
-std::string point_text(const cv::Point& at);
 
 // Everything a program is allowed to touch. The three big ones are held
 // by reference, so the objects behind them must outlive any run; the
@@ -83,77 +79,6 @@ struct ProgramResult {
 	ProgramExit exit {ProgramExit::FAILURE};
 	std::string description;
 };
-
-// What looking for one pattern ended in.
-enum class Look {
-	FOUND,
-	MISSING,   // not on screen within the budget - an answer, not a fault
-	STOPPED,
-	TROUBLE    // the search itself could not run
-};
-
-// Whether whoever asked for something wants it given up on. A program
-// hands in its own stop flag; anybody else - the console, say - leaves
-// this empty and is never interrupted.
-using StopCheck = std::function<bool()>;
-
-// What a click has to produce before it counts, and how hard to insist.
-//
-// A click that lands is not a click that worked. The interface may be
-// busy, the button may still be drawing itself, the game may drop a
-// press that falls between two rendered frames - and none of that looks
-// any different from success at the moment the button goes down. The
-// only way to know is to look for whatever the click was supposed to
-// bring about, so that is what this names.
-struct ClickConfirm {
-	// Any one of these appearing is proof enough: they are alternatives,
-	// the way a search for several patterns always is. Empty asks for no
-	// confirmation, which leaves a plain click.
-	std::vector<size_t>       images;
-	// How long to keep looking after each click. Each attempt gets this
-	// in full, so the whole thing can take (retries + 1) times as long.
-	std::chrono::milliseconds timeout {0};
-	// Further clicks to make when one goes unconfirmed. 0 means click
-	// once and report whether it showed.
-	int                       retries {0};
-
-	bool wanted() const noexcept { return !images.empty(); }
-};
-
-enum class Click {
-	CONFIRMED,     // clicked, and the game showed it had been taken
-	DONE,          // clicked, and no confirmation was asked for
-	UNCONFIRMED,   // every allowed click was made and none of them showed
-	STOPPED,
-	TROUBLE        // the click, or the search after it, could not be done
-};
-
-// What a click came to, whether or not it was confirmed.
-struct ClickReport {
-	ClickResult click;            // the last click that was made
-	int         clicks {0};       // how many were made in all
-	bool        confirmed {false};
-	cv::Point   at;               // where the confirmation was seen
-	size_t      image {0};        // which pattern it turned out to be
-	std::chrono::milliseconds spent {0};   // over the whole thing
-};
-
-// Clicks a point of the captured window and, when a confirmation was
-// asked for, waits for proof that the game took it - clicking again up
-// to retries times when none arrives.
-//
-// error is filled for TROUBLE and for UNCONFIRMED, since both are things
-// the caller will want to say out loud; the other outcomes leave it
-// alone. stopping may be empty, and is then never asked.
-Click confirmed_click(
-	ProgramContext&     context,
-	const cv::Point&    target,
-	int                 wait_ms,
-	const ClickConfirm& confirm,
-	const StopCheck&    stopping,
-	ClickReport&        report,
-	std::string&        error
-);
 
 /*
 	How a program gives up.
@@ -445,8 +370,6 @@ protected:
 	// What the program is allowed to touch, for the run in flight. Only
 	// valid inside exec(), which is to say inside run() and below.
 	ProgramContext& context() const noexcept { return *m_context; }
-	// How long this run has been going.
-	std::chrono::milliseconds elapsed() const;
 
 	// A stretch of time shared by more than one wait. Each of them takes
 	// what is left rather than the whole of it, so two waits that belong
@@ -527,21 +450,13 @@ protected:
 
 	// Waits for something to turn up, and gives up if it does not.
 	// Returns where it was seen.
-	//
-	// hint is added to the failure when there is something worth saying
-	// about why the thing might not be there - "is a destination still
-	// set?". Most of the time the phrase and the timeout say enough.
 	cv::Point appear(
 		const std::string&        what,
 		size_t                    image,
-		std::chrono::milliseconds budget,
-		const std::string&        hint = {}
+		std::chrono::milliseconds budget
 	) const;
 	cv::Point appear(
-		const std::string& what,
-		size_t             image,
-		const Budget&      budget,
-		const std::string& hint = {}
+		const std::string& what, size_t image, const Budget& budget
 	) const;
 	// Any one of several will do - "a gate or a station", say. One search
 	// shares the budget honestly between them and looks at the quick boxes
@@ -550,8 +465,7 @@ protected:
 	Sighting appear(
 		const std::string&         what,
 		const std::vector<size_t>& images,
-		std::chrono::milliseconds  budget,
-		const std::string&         hint = {}
+		std::chrono::milliseconds  budget
 	) const;
 
 	// Waits for something to go away again, looking once per pause: this
@@ -610,15 +524,11 @@ private:
 	// message: "hop 3: ".
 	std::string note_text() const;
 
-	// What every appear() is made of. budget is what the search gets;
-	// reported is what a failure says it was given, which is not the same
-	// once a shared Budget has already spent some of itself.
+	// What every appear() is made of.
 	Sighting watch_for(
 		const std::string&         what,
 		const std::vector<size_t>& images,
-		std::chrono::milliseconds  budget,
-		std::chrono::milliseconds  reported,
-		const std::string&         hint
+		std::chrono::milliseconds  budget
 	) const;
 
 	// Turns every declared pattern into a library index. Returns the names
@@ -642,7 +552,6 @@ private:
 	std::vector<ParamDecl*>   m_params;
 	std::vector<std::string>  m_notes;      // the open Doing scopes
 	ProgramContext*           m_context {nullptr};
-	ProgramClock::time_point  m_started;
 };
 
 // Declares one tunable of a program: its kind, its name, and what it is

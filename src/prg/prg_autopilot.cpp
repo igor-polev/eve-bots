@@ -56,12 +56,8 @@ ProgramResult AutopilotProgram::run()
 	// Then one pass per hop until the route runs out at a station.
 	for (int hop = 1; ; ++hop) {
 		Doing note {*this, hop_text(hop)};
-		if (fly_hop()) {
-			return done(
-				"route finished in " + seconds_text(elapsed()) + " over "
-				+ std::to_string(hop) + (1 == hop ? " hop" : " hops")
-			);
-		}
+		if (fly_hop())
+			return done("route finished over " + hop_text(hop));
 	}
 }
 
@@ -80,11 +76,8 @@ Program::Sighting AutopilotProgram::next_waypoint()
 		if (sighted("the route panel", STATIONS, reading.left(), seen))
 			return seen;
 
-		if (reading.left() <= std::chrono::milliseconds::zero()) {
-			fail("no gate or station in the route panel within "
-			     + seconds_text(reading.total())
-			     + " - is a destination still set?");
-		}
+		if (reading.left() <= std::chrono::milliseconds::zero())
+			fail("nothing in the route panel to fly to");
 		pause(RECHECK_INTERVAL, "the route panel to say what is next");
 	}
 }
