@@ -54,6 +54,9 @@ private:
 	// carries on either way: the menu is a convenience, and everything it
 	// offers can be typed.
 	void load_menu();
+	// Captures a client as the application starts, when the settings ask
+	// for it. Asks which one when there is more than one to choose from.
+	void autostart_capture();
 	// What the menu clicks do. Called on the menu's thread.
 	void start_from_menu(size_t program);
 	void abort_from_menu();

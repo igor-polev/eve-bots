@@ -25,6 +25,7 @@ constexpr const char* KEY_IMAGE_DIR    = "IMAGE_LIBRARY_DIR";
 constexpr const char* KEY_THRESHOLD    = "DETECT_THRESHOLD_DEFAULT";
 constexpr const char* KEY_MIN_MARGINE  = "MIN_MARGINE";
 constexpr const char* KEY_MENU_HOTKEY  = "MENU_HOTKEY";
+constexpr const char* KEY_AUTOSTART    = "AUTOSTART_CAPTURE";
 constexpr const char* KEY_ACTION_TIMEOUT  = "ACTION_TIMEOUT_DEFAULT";
 constexpr const char* KEY_CONFIRM_TIMEOUT = "CONFIRM_TIMEOUT_DEFAULT";
 constexpr const char* KEY_ACTION_RETRIES  = "ACTION_RETRIES_DEFAULT";
@@ -36,6 +37,17 @@ int64_t read_whole(const json& settings, const char* key)
 	if (!value.is_number_integer())
 		throw std::runtime_error(std::string(key) + " must be a whole number");
 	return value.get<int64_t>();
+}
+
+// Reads a required yes-or-no setting.
+bool read_flag(const json& settings, const char* key)
+{
+	const json& value = settings.at(key);
+	if (!value.is_boolean())
+		throw std::runtime_error(
+			std::string(key) + " must be true or false"
+		);
+	return value.get<bool>();
 }
 
 // Reads a required string setting.
@@ -87,6 +99,7 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 	int64_t confirm_timeout {0};
 	int64_t action_retries  {0};
 	double  threshold       {0.0};
+	bool    autostart       {false};
 	try {
 		eve_window.class_name   = read_string(settings, KEY_WINDOW_CLASS);
 		eve_window.title_prefix = read_string(settings, KEY_TITLE_PREFIX);
@@ -110,6 +123,7 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		action_timeout  = read_whole(settings, KEY_ACTION_TIMEOUT);
 		confirm_timeout = read_whole(settings, KEY_CONFIRM_TIMEOUT);
 		action_retries  = read_whole(settings, KEY_ACTION_RETRIES);
+		autostart       = read_flag(settings, KEY_AUTOSTART);
 	}
 	catch (const json::out_of_range&) {
 		// at() names the missing key in its message, but not helpfully
@@ -123,7 +137,8 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		      + KEY_MIN_MARGINE  + ", "
 		      + KEY_ACTION_TIMEOUT  + ", "
 		      + KEY_CONFIRM_TIMEOUT + ", "
-		      + KEY_ACTION_RETRIES;
+		      + KEY_ACTION_RETRIES  + ", "
+		      + KEY_AUTOSTART;
 		return false;
 	}
 	catch (const std::exception& e) {
@@ -211,6 +226,7 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 	m_detect_threshold   = threshold;
 	m_min_margine        = static_cast<int>(min_margine);
 	m_menu_hotkey        = menu_hotkey;
+	m_autostart_capture  = autostart;
 	m_defaults.ACTION_TIMEOUT  = std::chrono::milliseconds {action_timeout};
 	m_defaults.CONFIRM_TIMEOUT = std::chrono::milliseconds {confirm_timeout};
 	m_defaults.ACTION_RETRIES  = static_cast<int>(action_retries);

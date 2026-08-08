@@ -235,6 +235,7 @@ int Cli::run()
 		return -1;
 	}
 	load_menu();
+	autostart_capture();
 	std::cout << "Type 'help' for a list of commands.\n\n";
 
 	std::string line;
@@ -677,6 +678,43 @@ bool Cli::load_programs()
 		}
 	);
 	return true;
+}
+
+void Cli::autostart_capture()
+{
+	if (!m_settings.autostart_capture()) return;
+
+	m_windows = find_eve_windows(m_settings.eve_window());
+	if (m_windows.empty()) {
+		std::cout << "No EVE Online window to capture yet; 'start' one when "
+		             "it is up.\n";
+		return;
+	}
+
+	size_t index {0};
+	if (m_windows.size() > 1) {
+		std::cout << "Several EVE windows are open:\n";
+		print_windows();
+		// The only question the application ever asks. Anything that is
+		// not one of the numbers leaves the capture stopped, which is
+		// where 'start' picks up.
+		std::cout << "Which one to capture (Enter for none)? " << std::flush;
+		std::string line;
+		if (!std::getline(std::cin, line)) return;
+
+		const std::vector<std::string> answer = tokenize(line);
+		if (answer.empty()) return;
+
+		int typed {0};
+		if (!parse_int(answer.front(), typed)
+			|| typed < 0 || static_cast<size_t>(typed) >= m_windows.size())
+		{
+			std::cout << "Not one of the windows listed; nothing captured.\n";
+			return;
+		}
+		index = static_cast<size_t>(typed);
+	}
+	cmd_start({std::to_string(index)});
 }
 
 void Cli::load_menu()

@@ -53,6 +53,9 @@ public:
 	int min_margine() const noexcept { return m_min_margine; }
 	// Invalid when the file asked for no menu.
 	const Hotkey& menu_hotkey() const noexcept { return m_menu_hotkey; }
+	// Whether to capture a client as the application starts, without
+	// waiting to be told to.
+	bool autostart_capture() const noexcept { return m_autostart_capture; }
 	// What every program starts from.
 	const ProgramDefaults& program_defaults() const noexcept
 		{ return m_defaults; }
@@ -66,4 +69,5 @@ private:
 	std::wstring    m_image_dir;
 	double          m_detect_threshold {0.0};
 	int             m_min_margine {0};
+	bool            m_autostart_capture {false};
 };
