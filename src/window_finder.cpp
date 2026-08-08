@@ -79,13 +79,17 @@ BOOL CALLBACK enum_proc(HWND hwnd, LPARAM param)
 
 bool is_eve_window(const WindowInfo& info, const EveWindowMatch& match)
 {
+	// Every criterion that was given has to hold. Either one on its own
+	// catches something else: the class is shared with the launcher, and
+	// the title is shared with anything that happens to be showing the
+	// word EVE - a browser reading about the game, most easily.
 	if (!match.class_name.empty()
-		&& to_lower(info.class_name) == to_lower(match.class_name))
-		return true;
+		&& to_lower(info.class_name) != to_lower(match.class_name))
+		return false;
 	if (!match.title_prefix.empty()
-		&& starts_with(to_lower(info.title), to_lower(match.title_prefix)))
-		return true;
-	return false;
+		&& !starts_with(to_lower(info.title), to_lower(match.title_prefix)))
+		return false;
+	return true;
 }
 
 std::wstring eve_character_name(

@@ -18,10 +18,12 @@ struct WindowInfo {
 };
 
 // How to recognise an EVE client window. Both fields come from the config
-// file; matching is case insensitive and an empty field is simply skipped.
+// file; matching is case insensitive, an empty field is simply skipped,
+// and whatever is left has to hold all at once - neither test alone is
+// enough to tell a client from everything else on the desktop.
 struct EveWindowMatch {
-	std::wstring class_name;   // window class, the definitive test
-	std::wstring title_prefix; // title prefix, fallback if the class changes
+	std::wstring class_name;   // window class: the launcher shares it
+	std::wstring title_prefix; // title prefix: any window may claim it
 };
 
 // All visible, non-cloaked top-level windows that have a title.
