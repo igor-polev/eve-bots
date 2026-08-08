@@ -30,6 +30,10 @@ public:
 	bool loaded() const noexcept { return !m_source.empty(); }
 
 	bool has(const std::string& program) const;
+	// Whether the file says anything about one parameter, which is not the
+	// same as what its value came out as: a program's built in default and
+	// a file that repeats it are indistinguishable by value alone.
+	bool has(const std::string& program, const std::string& key) const;
 
 	// One parameter of one program, or fallback when either is missing.
 	double number(
@@ -43,6 +47,10 @@ public:
 
 	// Programs named in the file, in the order they appear.
 	const std::vector<std::string>& names() const noexcept { return m_names; }
+
+	// Every parameter the file names for one program, so that a key no
+	// program knows can be reported rather than quietly ignored.
+	std::vector<std::string> keys(const std::string& program) const;
 
 private:
 	// Parameters are kept by type rather than as raw JSON so that nothing

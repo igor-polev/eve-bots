@@ -116,6 +116,29 @@ bool ProgramParams::has(const std::string& program) const
 	return 0 != m_programs.count(program);
 }
 
+bool ProgramParams::has(const std::string& program, const std::string& key) const
+{
+	const auto found = m_programs.find(program);
+	if (m_programs.end() == found) return false;
+	return 0 != found->second.numbers.count(key)
+	    || 0 != found->second.texts.count(key);
+}
+
+std::vector<std::string> ProgramParams::keys(const std::string& program) const
+{
+	std::vector<std::string> found;
+	const auto values = m_programs.find(program);
+	if (m_programs.end() == values) return found;
+
+	// NAME and COMMENT were dropped as the file was read, so whatever is
+	// left was meant to tune something.
+	for (const auto& number : values->second.numbers)
+		found.push_back(number.first);
+	for (const auto& text : values->second.texts)
+		found.push_back(text.first);
+	return found;
+}
+
 double ProgramParams::number(
 	const std::string& program, const std::string& key, double fallback) const
 {

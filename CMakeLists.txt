@@ -25,8 +25,9 @@ add_executable(${PROJECT_NAME}
     src/mouse_input.cpp
     src/program_params.cpp
     src/program.cpp
-    src/undock_program.cpp
-    src/autopilot_program.cpp
+    src/prg/prg_registry.cpp
+    src/prg/prg_undock.cpp
+    src/prg/prg_autopilot.cpp
 )
 target_include_directories(${PROJECT_NAME} PRIVATE include)
 

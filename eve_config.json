@@ -5,5 +5,8 @@
     "IMAGE_LIBRARY_DIR"         : "img_lib",
     "DETECT_THRESHOLD_DEFAULT"  : 0.9,
     "MIN_MARGINE"               : 4,
+    "ACTION_TIMEOUT_DEFAULT"    : 2000,
+    "CONFIRM_TIMEOUT_DEFAULT"   : 3000,
+    "ACTION_RETRIES_DEFAULT"    : 3,
     "MENU_HOTKEY"               : "Alt+`"
 }

@@ -25,6 +25,18 @@ constexpr const char* KEY_IMAGE_DIR    = "IMAGE_LIBRARY_DIR";
 constexpr const char* KEY_THRESHOLD    = "DETECT_THRESHOLD_DEFAULT";
 constexpr const char* KEY_MIN_MARGINE  = "MIN_MARGINE";
 constexpr const char* KEY_MENU_HOTKEY  = "MENU_HOTKEY";
+constexpr const char* KEY_ACTION_TIMEOUT  = "ACTION_TIMEOUT_DEFAULT";
+constexpr const char* KEY_CONFIRM_TIMEOUT = "CONFIRM_TIMEOUT_DEFAULT";
+constexpr const char* KEY_ACTION_RETRIES  = "ACTION_RETRIES_DEFAULT";
+
+// Reads a required whole-number setting.
+int64_t read_whole(const json& settings, const char* key)
+{
+	const json& value = settings.at(key);
+	if (!value.is_number_integer())
+		throw std::runtime_error(std::string(key) + " must be a whole number");
+	return value.get<int64_t>();
+}
 
 // Reads a required string setting.
 std::wstring read_string(const json& settings, const char* key)
@@ -69,9 +81,12 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 
 	EveWindowMatch eve_window;
 	std::wstring image_dir;
-	int64_t frame_rate   {0};
-	int64_t min_margine  {0};
-	double  threshold    {0.0};
+	int64_t frame_rate      {0};
+	int64_t min_margine     {0};
+	int64_t action_timeout  {0};
+	int64_t confirm_timeout {0};
+	int64_t action_retries  {0};
+	double  threshold       {0.0};
 	try {
 		eve_window.class_name   = read_string(settings, KEY_WINDOW_CLASS);
 		eve_window.title_prefix = read_string(settings, KEY_TITLE_PREFIX);
@@ -91,12 +106,10 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 			);
 		threshold = certainty.get<double>();
 
-		const json& margine = settings.at(KEY_MIN_MARGINE);
-		if (!margine.is_number_integer())
-			throw std::runtime_error(
-				std::string(KEY_MIN_MARGINE) + " must be a whole number"
-			);
-		min_margine = margine.get<int64_t>();
+		min_margine     = read_whole(settings, KEY_MIN_MARGINE);
+		action_timeout  = read_whole(settings, KEY_ACTION_TIMEOUT);
+		confirm_timeout = read_whole(settings, KEY_CONFIRM_TIMEOUT);
+		action_retries  = read_whole(settings, KEY_ACTION_RETRIES);
 	}
 	catch (const json::out_of_range&) {
 		// at() names the missing key in its message, but not helpfully
@@ -107,12 +120,37 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		      + KEY_FRAME_RATE   + ", "
 		      + KEY_IMAGE_DIR    + ", "
 		      + KEY_THRESHOLD    + ", "
-		      + KEY_MIN_MARGINE;
+		      + KEY_MIN_MARGINE  + ", "
+		      + KEY_ACTION_TIMEOUT  + ", "
+		      + KEY_CONFIRM_TIMEOUT + ", "
+		      + KEY_ACTION_RETRIES;
 		return false;
 	}
 	catch (const std::exception& e) {
 		error = std::string("bad setting in ") + to_utf8(path)
 		      + ": " + e.what();
+		return false;
+	}
+
+	// A click that gives the game no time at all to react is a click that
+	// will never be confirmed, and one that keeps looking forever is a
+	// program that never reports a failure.
+	if (action_timeout < 0) {
+		error = std::string(KEY_ACTION_TIMEOUT)
+		      + " is milliseconds and cannot be negative (got "
+		      + std::to_string(action_timeout) + ")";
+		return false;
+	}
+	if (confirm_timeout < 1) {
+		error = std::string(KEY_CONFIRM_TIMEOUT)
+		      + " is milliseconds and must be at least 1 (got "
+		      + std::to_string(confirm_timeout) + ")";
+		return false;
+	}
+	if (action_retries < 0 || action_retries > MAX_ACTION_RETRIES) {
+		error = std::string(KEY_ACTION_RETRIES)
+		      + " must be between 0 and " + std::to_string(MAX_ACTION_RETRIES)
+		      + " (got " + std::to_string(action_retries) + ")";
 		return false;
 	}
 
@@ -173,6 +211,9 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 	m_detect_threshold   = threshold;
 	m_min_margine        = static_cast<int>(min_margine);
 	m_menu_hotkey        = menu_hotkey;
+	m_defaults.ACTION_TIMEOUT  = std::chrono::milliseconds {action_timeout};
+	m_defaults.CONFIRM_TIMEOUT = std::chrono::milliseconds {confirm_timeout};
+	m_defaults.ACTION_RETRIES  = static_cast<int>(action_retries);
 	// a relative image folder is meant relative to the settings file,
 	// not to whatever directory the app happens to be started from
 	m_image_dir          = join_path(directory_of(path), image_dir);

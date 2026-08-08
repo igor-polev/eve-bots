@@ -10,7 +10,14 @@
             "NAME"            : "warp",
             "FILE"            : "msg_warp.png",
             "COMMENT"         : "Warp is active message",
-            "THRESHOLD"       : 0.8,
+            "THRESHOLD"       : 0.75,
+            "FIXED_DIRECTIONS": "XY"
+        },
+        {
+            "NAME"            : "warp_vector",
+            "FILE"            : "msg_warp_vector.png",
+            "COMMENT"         : "Warp vector message",
+            "THRESHOLD"       : 0.75,
             "FIXED_DIRECTIONS": "XY"
         },
         {

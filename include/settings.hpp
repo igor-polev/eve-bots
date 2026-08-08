@@ -9,6 +9,7 @@
 #include <string>
 
 #include "hotkey.hpp"
+#include "program_defaults.hpp"
 #include "window_finder.hpp"
 
 class Settings {
@@ -25,6 +26,9 @@ public:
 	// Widest MIN_MARGINE worth allowing; past this a "small" window is
 	// most of the frame and the searches it guards stop being cheap.
 	static constexpr int MAX_MIN_MARGINE = 256;
+	// A click repeated this many times has stopped being a retry and
+	// started being a program hammering the interface.
+	static constexpr int MAX_ACTION_RETRIES = 20;
 
 	// Looks for FILE_NAME in the working directory, then next to the
 	// executable. On failure returns false and fills error.
@@ -49,13 +53,17 @@ public:
 	int min_margine() const noexcept { return m_min_margine; }
 	// Invalid when the file asked for no menu.
 	const Hotkey& menu_hotkey() const noexcept { return m_menu_hotkey; }
+	// What every program starts from.
+	const ProgramDefaults& program_defaults() const noexcept
+		{ return m_defaults; }
 
 private:
-	std::wstring   m_source;
-	Hotkey         m_menu_hotkey;
-	EveWindowMatch m_eve_window;
-	unsigned       m_capture_frame_rate {0};
-	std::wstring   m_image_dir;
-	double         m_detect_threshold {0.0};
-	int            m_min_margine {0};
+	std::wstring    m_source;
+	Hotkey          m_menu_hotkey;
+	ProgramDefaults m_defaults;
+	EveWindowMatch  m_eve_window;
+	unsigned        m_capture_frame_rate {0};
+	std::wstring    m_image_dir;
+	double          m_detect_threshold {0.0};
+	int             m_min_margine {0};
 };
