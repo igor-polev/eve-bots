@@ -104,6 +104,11 @@ private:
 	ProgramExit m_exit;
 };
 
+// Declares one tunable of a program: its kind, its name, and what it is
+// without prog_params.json. The name is written out as the key as well,
+// so the two cannot come apart.
+#define PROG_PARAM(kind, NAME, fallback) kind NAME {*this, #NAME, fallback}
+
 class Program {
 public:
 	explicit Program(std::string name) : m_name {std::move(name)} {}
@@ -142,6 +147,9 @@ public:
 	// to whichever one is doing the work for it.
 	virtual void request_stop() noexcept { m_stop.store(true); }
 	bool stopping() const noexcept { return m_stop.load(); }
+
+	// Whether the pop-up menu offers this one.
+	bool in_menu() const noexcept { return SHOW_IN_MENU.value(); }
 
 protected:
 	/*
@@ -330,6 +338,28 @@ protected:
 		const char* suffix() const override { return "_INTERVAL"; }
 		// Zero would be a program looking as fast as it can.
 		long long   least()  const override { return 1; }
+	};
+
+	// A yes or no. Its name says what it turns on rather than what it
+	// costs to run, so there is no ending for it to have.
+	class Flag : public ParamDecl {
+	public:
+		Flag(Program& owner, const char* key, bool fallback)
+			: ParamDecl {owner, key}, m_value {fallback} {}
+
+		bool value() const noexcept { return m_value; }
+		operator bool() const noexcept { return m_value; }
+
+	private:
+		bool read(
+			const ProgramParams& params,
+			const std::string&   program,
+			std::string&         error
+		) override;
+		std::string text()   const override { return m_value ? "yes" : "no"; }
+		const char* suffix() const override { return ""; }
+
+		bool m_value;
 	};
 
 	// A number of times, not a length of time.
@@ -552,12 +582,14 @@ private:
 	std::vector<ParamDecl*>   m_params;
 	std::vector<std::string>  m_notes;      // the open Doing scopes
 	ProgramContext*           m_context {nullptr};
-};
 
-// Declares one tunable of a program: its kind, its name, and what it is
-// without prog_params.json. The name is written out as the key as well,
-// so the two cannot come apart.
-#define PROG_PARAM(kind, NAME, fallback) kind NAME {*this, #NAME, fallback}
+	// Every program has this one, whether or not it declares anything
+	// else: the menu has room for a handful of entries and most programs
+	// are steps other programs are built out of, so a program is kept out
+	// of it until prog_params.json says otherwise. Declared after the list
+	// it registers itself with, which has to exist by then.
+	PROG_PARAM(Flag, SHOW_IN_MENU, false);
+};
 
 /*
 	Holds the known programs and runs one at a time. One at a time because

@@ -2,12 +2,14 @@
     "COMMENT": [
         "What each program can be told, over what it does on its own. Leave a value out and the program keeps its built in one; a key no program knows is an error rather than a silent no-op, so a misspelt name is noticed at startup.",
         "The end of a name says what the number costs to run. A _PAUSE is time the program really spends, every time, whether or not anything was going to happen - that is where a program gets faster. An _INTERVAL is the gap between two looks at the same thing, spent over and over, but only while that wait lasts. A _TIMEOUT is an upper bound and is only ever paid when something has gone wrong, so raising one costs nothing until it does. A _RETRIES is a number of attempts.",
-        "How long a click waits for the game to show it was taken, and how many times it is repeated, are the same for every program and live in eve_config.json as CONFIRM_TIMEOUT_DEFAULT and ACTION_RETRIES_DEFAULT."
+        "How long a click waits for the game to show it was taken, and how many times it is repeated, are the same for every program and live in eve_config.json as CONFIRM_TIMEOUT_DEFAULT and ACTION_RETRIES_DEFAULT.",
+        "SHOW_IN_MENU can be set for any program and puts it in the pop-up menu. Left out, a program is console-only: most of them are steps other programs are built out of, and starting one of those on its own is rarely what anybody wants."
     ],
     "PROGRAMS": [
         {
             "NAME"                 : "undock",
             "COMMENT"              : "UNDOCK_BUTTON_TIMEOUT covers finding the undock button, or settling that the ship was never docked. UNDOCK_CLICK_PAUSE is the moment given to the click itself before anything is looked for. IN_SPACE_TIMEOUT then runs until the ship core says the ship is out, which takes as long as the undock animation does.",
+            "SHOW_IN_MENU"         : true,
             "UNDOCK_BUTTON_TIMEOUT": 15000,
             "UNDOCK_CLICK_PAUSE"   : 1000,
             "IN_SPACE_TIMEOUT"     : 45000
@@ -15,6 +17,7 @@
         {
             "NAME"               : "autopilot",
             "COMMENT"            : "DESTINATION_TIMEOUT waits for a gate or station icon in the route panel. WARP_TIMEOUT covers the whole warp, from the command being taken until the warp message has both appeared and gone away again. RECHECK_INTERVAL is the gap between two looks at the same thing - an empty route panel, or a warp still going on. GATE_JUMP_PAUSE and DOCKING_PAUSE let the session change or the docking animation finish, and DOCKING_TIMEOUT waits for the undock button that proves the ship is inside.",
+            "SHOW_IN_MENU"       : true,
             "DESTINATION_TIMEOUT": 10000,
             "WARP_TIMEOUT"       : 300000,
             "RECHECK_INTERVAL"   : 2000,

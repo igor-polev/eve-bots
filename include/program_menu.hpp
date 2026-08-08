@@ -7,9 +7,12 @@
 	The console is the whole interface, but a hand on the mouse in the
 	middle of something is nowhere near it. This is the short way in: one
 	key combination, the list of programs over the centre of the client,
-	one click to start, and it is gone again. While a program is running
-	the same combination brings up its name and an Abort button instead,
-	since starting a second one is not something the runner allows.
+	one click to start, and it is gone again. The entries are numbered and
+	the number starts them, so the whole thing can be done from the
+	keyboard without the hand ever reaching the console. While a program
+	is running the same combination brings up its name and an Abort button
+	instead, since starting a second one is not something the runner
+	allows.
 
 	It lives on its own thread. A window belongs to the thread that
 	created it and only that thread may pump its messages, and the
@@ -42,7 +45,9 @@
 // called on the menu's own thread, so whatever they touch has to be
 // ready for that.
 struct MenuHooks {
-	// Names of the programs, in the order they should be listed.
+	// Names of the programs to offer, in the order they should be listed.
+	// Not necessarily every program there is - the menu shows what it is
+	// given and knows nothing about the rest.
 	std::function<std::vector<std::string>()> programs;
 	// Name of the program in flight, empty when none is.
 	std::function<std::string()>              running;

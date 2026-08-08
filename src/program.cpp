@@ -282,6 +282,23 @@ std::string Program::Millis::text() const
 	return std::to_string(m_value.count()) + " ms";
 }
 
+bool Program::Flag::read(
+	const ProgramParams& params,
+	const std::string&   program,
+	std::string&         error)
+{
+	m_tuned = params.has(program, key());
+	if (!m_tuned) return true;
+
+	const double value = params.number(program, key(), NOT_A_NUMBER);
+	if (NOT_A_NUMBER == value) {
+		error = std::string(key()) + " must be true or false";
+		return false;
+	}
+	m_value = 0.0 != value;
+	return true;
+}
+
 bool Program::Count::read(
 	const ProgramParams& params,
 	const std::string&   program,
@@ -319,9 +336,13 @@ bool Program::configure(const ProgramParams& params, std::string& error)
 		// that unreadable, so it is refused here rather than left to be
 		// noticed later.
 		const std::string key    = param->key();
+		// A Flag says what it turns on rather than what it costs, so it is
+		// the one kind with no ending to check.
 		const std::string wanted = param->suffix();
-		if (key.size() <= wanted.size() ||
-			0 != key.compare(key.size() - wanted.size(), wanted.size(), wanted))
+		if (!wanted.empty()
+			&& (key.size() <= wanted.size()
+			    || 0 != key.compare(
+			           key.size() - wanted.size(), wanted.size(), wanted)))
 		{
 			error = key + " must be named to end in " + wanted;
 			return false;

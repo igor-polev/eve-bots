@@ -32,6 +32,20 @@ constexpr int            HOTKEY_ID    = 1;
 
 constexpr size_t NOT_CHOSEN = static_cast<size_t>(-1);
 
+// How many entries get a number of their own. There are only ten digits,
+// and a menu that needs more than ten is one to scroll rather than one to
+// type at.
+constexpr size_t NUMBERED = 10;
+
+// The key that starts entry i: 1 for the first, 0 for the tenth, the way
+// the entries are labelled.
+ImGuiKey number_key(size_t entry)
+{
+	return 9 == entry
+		? ImGuiKey_0
+		: static_cast<ImGuiKey>(ImGuiKey_1 + static_cast<int>(entry));
+}
+
 // Dark enough to read as an overlay against a lit game window.
 constexpr float BACKGROUND[4] {0.07f, 0.08f, 0.10f, 1.0f};
 
@@ -487,8 +501,16 @@ void ProgramMenu::draw()
 		if (names.empty()) {
 			ImGui::TextDisabled("no programs");
 		} else {
-			for (size_t i = 0; i < names.size(); ++i)
-				if (ImGui::Button(names[i].c_str(), row)) chosen = i;
+			for (size_t i = 0; i < names.size(); ++i) {
+				// Numbered 1 to 9 and then 0, the way a person counts a
+				// short list, so the key to press is on the entry itself.
+				const std::string label = i < NUMBERED
+					? std::to_string((i + 1) % NUMBERED) + "   " + names[i]
+					: "    " + names[i];
+				if (ImGui::Button(label.c_str(), row)) chosen = i;
+				if (i < NUMBERED && ImGui::IsKeyPressed(number_key(i)))
+					chosen = i;
+			}
 		}
 	} else {
 		ImGui::TextDisabled("RUNNING");

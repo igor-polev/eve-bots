@@ -87,6 +87,10 @@ private:
 	ScreenCapture           m_capture;
 	ImageDetector           m_detector;
 	ProgramRunner           m_programs;
+	// Which programs the menu offers, in the order it lists them. Settled
+	// once at startup, so what the menu hands back can be turned into a
+	// program the runner knows.
+	std::vector<size_t>     m_menu_programs;
 	// Declared last so it is torn down first: its thread calls back into
 	// the runner, which must still be here when it does.
 	ProgramMenu             m_menu;

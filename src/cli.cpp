@@ -59,10 +59,11 @@ constexpr const char* HELP_TEXT =
 	"                      finishes\n"
 	"    abort             ask the running program to stop early\n"
 	"    exit              quit the application\n"
-	"The hotkey named by MENU_HOTKEY in the settings brings the same list\n"
-	"of programs up over the captured window: click one to start it, or\n"
-	"Abort to stop whatever is running. Press it again, press Escape or\n"
-	"click elsewhere to put it away.\n";
+	"The hotkey named by MENU_HOTKEY in the settings brings the programs\n"
+	"marked SHOW_IN_MENU up over the captured window: click one to start\n"
+	"it, or press the number it is listed under; Abort stops whatever is\n"
+	"running. Press the hotkey again, press Escape or click elsewhere to\n"
+	"put it away.\n";
 
 constexpr const char* CLICK_USAGE =
 	"Usage: click <image> [options]     the middle of a detected pattern\n"
@@ -726,19 +727,34 @@ void Cli::load_menu()
 		return;
 	}
 
+	// Only what SHOW_IN_MENU asked for. Most programs are steps other
+	// programs are built out of, and a menu of those is a menu of ways to
+	// leave a ship half way through something.
+	m_menu_programs.clear();
+	for (size_t i = 0; i < m_programs.size(); ++i)
+		if (m_programs(i).in_menu()) m_menu_programs.push_back(i);
+	if (m_menu_programs.empty()) {
+		std::cout << "Menu: off (no program has SHOW_IN_MENU in "
+		          << to_utf8(ProgramParams::FILE_NAME) << ").\n";
+		return;
+	}
+
 	// The menu asks the same questions 'programs', 'run' and 'abort'
 	// answer, and gets them answered the same way - it is another way in,
 	// not another set of rules.
 	MenuHooks hooks;
 	hooks.programs = [this] {
 		std::vector<std::string> names;
-		names.reserve(m_programs.size());
-		for (size_t i = 0; i < m_programs.size(); ++i)
-			names.push_back(m_programs(i).name());
+		names.reserve(m_menu_programs.size());
+		for (size_t program : m_menu_programs)
+			names.push_back(m_programs(program).name());
 		return names;
 	};
 	hooks.running = [this] { return m_programs.current(); };
-	hooks.start   = [this](size_t program) { start_from_menu(program); };
+	hooks.start   = [this](size_t entry) {
+		if (entry < m_menu_programs.size())
+			start_from_menu(m_menu_programs[entry]);
+	};
 	hooks.abort   = [this] { abort_from_menu(); };
 	// Whatever is being captured is what a program would act on, so that
 	// is what the menu should appear over. Nothing while capture is
