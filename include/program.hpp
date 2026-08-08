@@ -65,6 +65,7 @@ struct ProgramContext {
 	ImageDetector&       detector;
 	const ScreenCapture& capture;
 	ProgramDefaults      defaults;
+	InputPriority        priority;
 };
 
 enum class ProgramExit {

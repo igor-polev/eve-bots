@@ -9,6 +9,7 @@
 #include <string>
 
 #include "hotkey.hpp"
+#include "input_priority.hpp"
 #include "program_defaults.hpp"
 #include "window_finder.hpp"
 
@@ -29,6 +30,13 @@ public:
 	// A click repeated this many times has stopped being a retry and
 	// started being a program hammering the interface.
 	static constexpr int MAX_ACTION_RETRIES = 20;
+	// Past a minute of required quiet the bot would spend more of its time
+	// waiting for a gap than working, and anybody at the keyboard would
+	// simply stop it.
+	static constexpr int64_t MAX_USER_PRIORITY_IDLE = 60000;
+	// And past ten minutes of patience a program has not been deferring to
+	// the user, it has hung.
+	static constexpr int64_t MAX_USER_PRIORITY_TIMEOUT = 600000;
 
 	// Looks for FILE_NAME in the working directory, then next to the
 	// executable. On failure returns false and fills error.
@@ -59,11 +67,16 @@ public:
 	// What every program starts from.
 	const ProgramDefaults& program_defaults() const noexcept
 		{ return m_defaults; }
+	// How much of the desktop the person using it gets to keep while a
+	// program is clicking.
+	const InputPriority& input_priority() const noexcept
+		{ return m_priority; }
 
 private:
 	std::wstring    m_source;
 	Hotkey          m_menu_hotkey;
 	ProgramDefaults m_defaults;
+	InputPriority   m_priority;
 	EveWindowMatch  m_eve_window;
 	unsigned        m_capture_frame_rate {0};
 	std::wstring    m_image_dir;

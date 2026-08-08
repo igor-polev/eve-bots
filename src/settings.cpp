@@ -29,6 +29,8 @@ constexpr const char* KEY_AUTOSTART    = "AUTOSTART_CAPTURE";
 constexpr const char* KEY_ACTION_TIMEOUT  = "ACTION_TIMEOUT_DEFAULT";
 constexpr const char* KEY_CONFIRM_TIMEOUT = "CONFIRM_TIMEOUT_DEFAULT";
 constexpr const char* KEY_ACTION_RETRIES  = "ACTION_RETRIES_DEFAULT";
+constexpr const char* KEY_USER_IDLE       = "USER_PRIORITY_IDLE";
+constexpr const char* KEY_USER_TIMEOUT    = "USER_PRIORITY_TIMEOUT";
 
 // Reads a required whole-number setting.
 int64_t read_whole(const json& settings, const char* key)
@@ -98,6 +100,8 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 	int64_t action_timeout  {0};
 	int64_t confirm_timeout {0};
 	int64_t action_retries  {0};
+	int64_t user_idle       {0};
+	int64_t user_timeout    {0};
 	double  threshold       {0.0};
 	bool    autostart       {false};
 	try {
@@ -123,6 +127,8 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		action_timeout  = read_whole(settings, KEY_ACTION_TIMEOUT);
 		confirm_timeout = read_whole(settings, KEY_CONFIRM_TIMEOUT);
 		action_retries  = read_whole(settings, KEY_ACTION_RETRIES);
+		user_idle       = read_whole(settings, KEY_USER_IDLE);
+		user_timeout    = read_whole(settings, KEY_USER_TIMEOUT);
 		autostart       = read_flag(settings, KEY_AUTOSTART);
 	}
 	catch (const json::out_of_range&) {
@@ -138,6 +144,8 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		      + KEY_ACTION_TIMEOUT  + ", "
 		      + KEY_CONFIRM_TIMEOUT + ", "
 		      + KEY_ACTION_RETRIES  + ", "
+		      + KEY_USER_IDLE       + ", "
+		      + KEY_USER_TIMEOUT    + ", "
 		      + KEY_AUTOSTART;
 		return false;
 	}
@@ -166,6 +174,32 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		error = std::string(KEY_ACTION_RETRIES)
 		      + " must be between 0 and " + std::to_string(MAX_ACTION_RETRIES)
 		      + " (got " + std::to_string(action_retries) + ")";
+		return false;
+	}
+
+	// Zero idle is meaningful - it is the bot-first mode - so only the
+	// upper end needs guarding here.
+	if (user_idle < 0 || user_idle > MAX_USER_PRIORITY_IDLE) {
+		error = std::string(KEY_USER_IDLE)
+		      + " is milliseconds and must be between 0 and "
+		      + std::to_string(MAX_USER_PRIORITY_IDLE)
+		      + " (got " + std::to_string(user_idle) + ")";
+		return false;
+	}
+	if (user_timeout < 0 || user_timeout > MAX_USER_PRIORITY_TIMEOUT) {
+		error = std::string(KEY_USER_TIMEOUT)
+		      + " is milliseconds and must be between 0 and "
+		      + std::to_string(MAX_USER_PRIORITY_TIMEOUT)
+		      + " (got " + std::to_string(user_timeout) + ")";
+		return false;
+	}
+	// A timeout shorter than the quiet it is waiting for can never be
+	// satisfied: every click would wait the whole timeout and then go
+	// ahead anyway, which is the bot-first mode taken the slow way round.
+	if (user_idle > 0 && user_timeout < user_idle) {
+		error = std::string(KEY_USER_TIMEOUT) + " is shorter than "
+		      + KEY_USER_IDLE + ", so the wait for a quiet moment could "
+		      + "never end in one";
 		return false;
 	}
 
@@ -230,6 +264,8 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 	m_defaults.ACTION_TIMEOUT  = std::chrono::milliseconds {action_timeout};
 	m_defaults.CONFIRM_TIMEOUT = std::chrono::milliseconds {confirm_timeout};
 	m_defaults.ACTION_RETRIES  = static_cast<int>(action_retries);
+	m_priority.USER_PRIORITY_IDLE    = std::chrono::milliseconds {user_idle};
+	m_priority.USER_PRIORITY_TIMEOUT = std::chrono::milliseconds {user_timeout};
 	// a relative image folder is meant relative to the settings file,
 	// not to whatever directory the app happens to be started from
 	m_image_dir          = join_path(directory_of(path), image_dir);

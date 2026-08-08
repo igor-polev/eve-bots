@@ -5,6 +5,8 @@
 	Mouse input implementation.
 */
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <thread>
 
@@ -13,6 +15,8 @@
 #include "mouse_input.hpp"
 
 namespace {
+
+using Clock = std::chrono::steady_clock;
 
 // How long the button stays down. This is not politeness: the client was
 // measured redrawing at 13-41 fps, and an engine that samples input once
@@ -32,6 +36,67 @@ constexpr std::chrono::milliseconds MOVE_SETTLE {80};
 constexpr std::chrono::milliseconds FOCUS_TIMEOUT {1500};
 constexpr std::chrono::milliseconds FOCUS_POLL    {25};
 constexpr std::chrono::milliseconds FOCUS_SETTLE  {150};
+
+// How often the desktop is looked at while waiting for it to be free.
+// Short enough to catch the first gap in what the user is doing, and to
+// let a program that was told to stop go promptly.
+constexpr std::chrono::milliseconds YIELD_POLL {50};
+
+// GetLastInputInfo counts injected input as input, so our own clicks look
+// exactly like the user being busy: after one click the desktop would
+// appear to be in use for the whole idle time, every time, entirely by
+// ourselves. The tick of the last event we sent is therefore remembered,
+// and anything no newer than that is not the user.
+std::atomic<DWORD> g_our_input  {0};
+std::atomic<DWORD> g_user_input {0};
+std::atomic<bool>  g_user_known {false};
+
+void note_our_input() { g_our_input.store(GetTickCount()); }
+
+// How long since the user last touched the mouse or the keyboard. Ticks
+// wrap round every 49 days, so the comparisons are made on signed
+// differences rather than on the values themselves.
+std::chrono::milliseconds user_quiet_for()
+{
+	LASTINPUTINFO info {};
+	info.cbSize = sizeof(info);
+	// Not known ever to fail; if it somehow does, the answer that leaves
+	// programs working is that nobody is using the desktop.
+	if (!GetLastInputInfo(&info)) return std::chrono::hours {24};
+
+	const DWORD ours = g_our_input.load();
+	const bool  mine = 0 != ours
+	                && static_cast<LONG>(info.dwTime - ours) <= 0;
+	if (!mine || !g_user_known.load()) {
+		g_user_input.store(info.dwTime);
+		g_user_known.store(true);
+	}
+
+	const LONG quiet =
+		static_cast<LONG>(GetTickCount() - g_user_input.load());
+	return std::chrono::milliseconds {std::max<LONG>(0, quiet)};
+}
+
+// Waits for a gap in what the user is doing. False means a stop was asked
+// for; running out of time is not a failure but the end of the waiting -
+// stalling a program indefinitely is worse than one interrupted keystroke,
+// so the caller goes ahead.
+bool wait_for_quiet(
+	std::chrono::milliseconds needed,
+	Clock::time_point         deadline,
+	const InputStop&          stopping,
+	bool&                     yielded)
+{
+	if (needed <= std::chrono::milliseconds::zero()) return true;
+
+	while (user_quiet_for() < needed) {
+		if (stopping && stopping()) return false;
+		if (Clock::now() >= deadline) return true;
+		yielded = true;
+		std::this_thread::sleep_for(YIELD_POLL);
+	}
+	return true;
+}
 
 std::string last_error_text(const char* call)
 {
@@ -114,6 +179,9 @@ public:
 	~Desktop()
 	{
 		SetCursorPos(m_cursor.x, m_cursor.y);
+		// Putting the cursor back is input too, and would otherwise read
+		// back as the user having just moved the mouse.
+		note_our_input();
 
 		// Nothing to give back if the game already had the focus, or if
 		// whatever held it has since closed.
@@ -157,39 +225,27 @@ bool bring_to_front(HWND window, bool& activated, std::string& error)
 	return false;
 }
 
-} // namespace
-
-bool click_at(
+// One go at the disturbing part: raise the game, make sure the point on
+// screen still belongs to it, click it. The desktop is put back before
+// this returns however it ends, so an attempt that could not be made does
+// not sit on the user's focus while the next one is waited for.
+//
+// busy says the desktop was in somebody else's hands - the game would not
+// come forward, or another window was over the point. Those are worth
+// trying again; everything else here is worth reporting.
+bool try_click(
 	HWND             window,
 	const cv::Point& frame,
-	int              wait_ms,
 	ClickResult&     result,
+	bool&            busy,
 	std::string&     error)
 {
+	busy = false;
+
 	// Taken before anything is disturbed, so it can all be put back.
 	POINT cursor_was {};
 	GetCursorPos(&cursor_was);
 	const HWND front_was = GetForegroundWindow();
-
-	if (!window || !IsWindow(window)) {
-		error = "the captured window is gone";
-		return false;
-	}
-	// Nothing sensible can be clicked on a window that is not on screen,
-	// and capture would have stopped producing frames anyway.
-	if (IsIconic(window)) {
-		error = "the window is minimised";
-		return false;
-	}
-	if (frame.x < 0 || frame.y < 0) {
-		error = "cannot click " + std::to_string(frame.x) + ","
-		      + std::to_string(frame.y) + ": outside the frame";
-		return false;
-	}
-
-	result = ClickResult {};
-	result.frame = frame;
-	if (!map_point(window, frame, result.screen, error)) return false;
 
 	// From here on the desktop gets disturbed, so arm the undo first.
 	const Desktop desktop {cursor_was, front_was, &result.restored};
@@ -197,7 +253,10 @@ bool click_at(
 	// Before anything else, because an inactive window eats the click that
 	// activates it, and because this changes what is on top at the point
 	// the occlusion check below looks at.
-	if (!bring_to_front(window, result.activated, error)) return false;
+	if (!bring_to_front(window, result.activated, error)) {
+		busy = true;
+		return false;
+	}
 
 	// The window moves while it is coming forward on some setups, so the
 	// point is mapped again now that it has settled.
@@ -209,10 +268,9 @@ bool click_at(
 	const POINT at {result.screen.x, result.screen.y};
 	const HWND  owner = GetAncestor(WindowFromPoint(at), GA_ROOT);
 	if (owner != window) {
-		error = "cannot click " + std::to_string(result.screen.x) + ","
-		      + std::to_string(result.screen.y) + ": "
-		      + (owner ? window_name(owner) : std::string("another window"))
-		      + " is on top there even after raising the game";
+		error = (owner ? window_name(owner) : std::string("another window"))
+		      + " is on top of the game at the point to be clicked";
+		busy = true;
 		return false;
 	}
 
@@ -261,9 +319,78 @@ bool click_at(
 		// the button is down and staying down - say so plainly
 		error = "the mouse button was pressed but "
 		      + last_error_text("SendInput") + " on release";
+		note_our_input();
 		return false;
 	}
 
+	note_our_input();
+	return true;
+}
+
+} // namespace
+
+bool click_at(
+	HWND                 window,
+	const cv::Point&     frame,
+	int                  wait_ms,
+	const InputPriority& priority,
+	const InputStop&     stopping,
+	ClickResult&         result,
+	std::string&         error)
+{
+	if (!window || !IsWindow(window)) {
+		error = "the captured window is gone";
+		return false;
+	}
+	// Nothing sensible can be clicked on a window that is not on screen,
+	// and capture would have stopped producing frames anyway.
+	if (IsIconic(window)) {
+		error = "the window is minimised";
+		return false;
+	}
+	if (frame.x < 0 || frame.y < 0) {
+		error = "cannot click " + std::to_string(frame.x) + ","
+		      + std::to_string(frame.y) + ": outside the frame";
+		return false;
+	}
+
+	result = ClickResult {};
+	result.frame = frame;
+	// Only to settle now that the window can be located at all; try_click
+	// maps it again once the game has come forward.
+	if (!map_point(window, frame, result.screen, error)) return false;
+
+	const Clock::time_point deadline =
+		Clock::now() + priority.USER_PRIORITY_TIMEOUT;
+
+	while (true) {
+		if (stopping && stopping()) {
+			error = "stopped before the click was made";
+			return false;
+		}
+		if (!wait_for_quiet(
+				priority.USER_PRIORITY_IDLE, deadline, stopping,
+				result.yielded))
+		{
+			error = "stopped while waiting for the desktop to be free";
+			return false;
+		}
+
+		bool busy = false;
+		if (try_click(window, frame, result, busy, error)) break;
+		// Anything but the desktop being in use would fail the same way
+		// however long we waited, so it is reported as it stands.
+		if (!busy) return false;
+		// And when it is, the error from the last attempt is the right
+		// thing to report once the patience runs out.
+		if (Clock::now() >= deadline) return false;
+
+		result.yielded = true;
+		std::this_thread::sleep_for(YIELD_POLL);
+	}
+
+	// Out here rather than inside the attempt, so the game gets its moment
+	// to react with the focus already back where it belongs.
 	if (wait_ms > 0)
 		std::this_thread::sleep_for(std::chrono::milliseconds {wait_ms});
 	return true;

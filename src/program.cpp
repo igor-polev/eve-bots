@@ -175,11 +175,13 @@ Click confirmed_click(
 
 		if (!click_at(
 				context.capture.target(), target, wait_ms,
-				report.click, error))
+				context.priority, stopping, report.click, error))
 		{
-			// Clicking failed outright - the window is gone, or something
-			// is covering the point. Another attempt would fail the same
-			// way, so this is not what the retries are for.
+			// Clicking failed outright. A desktop busy with somebody else
+			// has already been waited out in there, so what is left is the
+			// window being gone or the input refused - which another
+			// attempt would meet in exactly the same state. This is not
+			// what the retries are for.
 			return Click::TROUBLE;
 		}
 		++report.clicks;

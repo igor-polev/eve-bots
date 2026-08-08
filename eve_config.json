@@ -8,6 +8,8 @@
     "ACTION_TIMEOUT_DEFAULT"    : 2000,
     "CONFIRM_TIMEOUT_DEFAULT"   : 3000,
     "ACTION_RETRIES_DEFAULT"    : 3,
+    "USER_PRIORITY_IDLE"        : 1000,
+    "USER_PRIORITY_TIMEOUT"     : 20000,
     "AUTOSTART_CAPTURE"         : true,
     "MENU_HOTKEY"               : "Alt+`"
 }

@@ -39,14 +39,30 @@
 	the game is covered by something else, so a detection can succeed while
 	the point on screen belongs to another application - and the click
 	would land in it. click_at() refuses in that case too.
+
+	Since the flicker cannot be removed it is placed instead: click_at()
+	waits for a gap in what the user is doing before it disturbs anything,
+	and waits again rather than giving up when it finds the game will not
+	come forward or another window over the point. How long it is willing
+	to be patient about either is InputPriority; zero required quiet is the
+	bot-first mode, where the interrupted work is the user's.
+
+	What cannot be defended against is the user acting during the click
+	itself - the quarter second between the game coming forward and the
+	button being released. Blocking real input for that long needs
+	privileges this process does not ask for, so the answer is the ordinary
+	one: an unconfirmed click is clicked again.
 */
 
 #pragma once
+#include <functional>
 #include <string>
 
 #include <windows.h>
 
 #include <opencv2/core.hpp>
+
+#include "input_priority.hpp"
 
 // How long to leave the interface alone after a click. The game needs a
 // moment to react before the next captured frame is worth looking at.
@@ -57,19 +73,28 @@ struct ClickResult {
 	cv::Point screen;   // the same point on the desktop
 	bool activated {false};   // the window had to be brought to the front
 	bool restored  {false};   // the focus was handed back afterwards
+	bool yielded   {false};   // the desktop was in use and was waited for
 };
+
+// Asked between waits, so that a program told to stop is not held here
+// for as long as the user keeps typing. May be empty, and is then never
+// asked.
+using InputStop = std::function<bool()>;
 
 // Clicks one point of window, given in capture frame coordinates, then
 // sleeps wait_ms so the game can react before the next frame is examined.
-// Brings the window to the front first and puts the cursor and the focus
-// back afterwards; see the note above for why that is not optional.
+// Waits for the desktop to be free under priority, brings the window to
+// the front, and puts the cursor and the focus back afterwards; see the
+// note above for why none of that is optional.
 // Returns false and fills error when the point cannot be mapped onto the
-// desktop, the window will not come forward, something else is covering
-// the point, or the input is refused.
+// desktop, the input is refused, a stop was asked for, or the desktop was
+// never free enough within the priority's timeout.
 bool click_at(
-	HWND             window,
-	const cv::Point& frame,
-	int              wait_ms,
-	ClickResult&     result,
-	std::string&     error
+	HWND                 window,
+	const cv::Point&     frame,
+	int                  wait_ms,
+	const InputPriority& priority,
+	const InputStop&     stopping,
+	ClickResult&         result,
+	std::string&         error
 );

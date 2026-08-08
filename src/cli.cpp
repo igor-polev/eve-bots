@@ -70,7 +70,10 @@ constexpr const char* CLICK_USAGE =
 	"       click <x> <y> [options]     a point, in capture frame pixels\n"
 	"The click is made with SendInput, which means the game is brought to\n"
 	"the front first and the real cursor is moved: a click on an inactive\n"
-	"window is swallowed to activate it instead of acting.\n"
+	"window is swallowed to activate it instead of acting. Both are put\n"
+	"back afterwards. Unlike a program's clicks this one does not wait for\n"
+	"a quiet moment, since you have just typed; it does wait for anything\n"
+	"lying over the point, up to USER_PRIORITY_TIMEOUT.\n"
 	"Options:\n"
 	"    find        search for the pattern when none has been detected yet\n"
 	"                (the default); nofind fails instead\n"
@@ -788,7 +791,8 @@ void Cli::start_from_menu(size_t program)
 	}
 
 	const ProgramContext context {
-		m_images, m_detector, m_capture, m_settings.program_defaults()
+		m_images, m_detector, m_capture, m_settings.program_defaults(),
+		m_settings.input_priority()
 	};
 	std::string error;
 	if (!m_programs.start(program, context, error)) {
@@ -882,7 +886,8 @@ void Cli::cmd_run(const std::vector<std::string>& args)
 	}
 
 	const ProgramContext context {
-		m_images, m_detector, m_capture, m_settings.program_defaults()
+		m_images, m_detector, m_capture, m_settings.program_defaults(),
+		m_settings.input_priority()
 	};
 	std::string error;
 	if (!m_programs.start(program, context, error)) {
@@ -990,9 +995,18 @@ void Cli::cmd_click(const std::vector<std::string>& args)
 
 	ClickResult clicked;
 	std::string error;
-	if (!click_at(m_capture.target(), target, UI_WAIT_DEFAULT, clicked, error)) {
+	// Bot priority, and deliberately so: whoever typed this was at the
+	// keyboard a moment ago, and waiting for them to go quiet would mean
+	// waiting out the whole timeout on every click made by hand.
+	if (!click_at(
+			m_capture.target(), target, UI_WAIT_DEFAULT,
+			asked_for_by_hand(m_settings.input_priority()), {},
+			clicked, error))
+	{
 		std::cout << "   [ERROR] " << error << "\n";
 		return;
 	}
-	std::cout << "Clicked" << what << ".\n";
+	std::cout << "Clicked" << what
+	          << (clicked.yielded ? ", once the desktop was free" : "")
+	          << ".\n";
 }
