@@ -23,8 +23,11 @@
 // eve_config.json carry a _DEFAULT on the end to say the same thing from
 // the file's side.
 struct ProgramDefaults {
-	// How long a program gives the interface to show the result of
-	// something it did, when it has no reason to want longer.
+	// How long a program gives the interface to have something on screen
+	// when it has no reason to want longer. What spends it is the look a
+	// click makes for the thing it is about to press: that has been found
+	// a moment earlier at every call site there is, so this is the wait
+	// for a box search to come back, not for a button to be drawn.
 	std::chrono::milliseconds ACTION_TIMEOUT  {2000};
 	// Confirming a click: how long the proof of it is waited for, per
 	// attempt.

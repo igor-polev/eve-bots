@@ -15,7 +15,7 @@
 
 #include "cli.hpp"
 #include "png_writer.hpp"
-#include "prg/prg_registry.hpp"
+#include "program_registry.hpp"
 #include "text_util.hpp"
 
 namespace {

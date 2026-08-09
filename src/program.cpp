@@ -570,6 +570,15 @@ void Program::vanish(
 bool Program::sighted(
 	const std::string&        what,
 	size_t                    image,
+	std::chrono::milliseconds budget) const
+{
+	cv::Point anywhere;
+	return sighted(what, image, budget, anywhere);
+}
+
+bool Program::sighted(
+	const std::string&        what,
+	size_t                    image,
 	std::chrono::milliseconds budget,
 	cv::Point&                at) const
 {
@@ -596,12 +605,22 @@ bool Program::sighted(
 	fail("cannot look for " + what + ": " + trouble);
 }
 
-cv::Point Program::click(
+void Program::click(
 	const std::string&         what,
 	size_t                     image,
-	const cv::Point&           corner,
 	const std::vector<size_t>& confirm) const
 {
+	// Where it is now, which is not always where whoever asked for the
+	// click last saw it. Failing to find it here is the same failure as
+	// failing to find it anywhere else, so watch_for() reports it.
+	const cv::Point corner = watch_for(
+		what, std::vector<size_t> {image}, common().ACTION_TIMEOUT
+	).at;
+
+	const ImagePattern& pattern = context().images(image);
+	const cv::Point target =
+		corner + cv::Point {pattern.width() / 2, pattern.height() / 2};
+
 	// The usual confirmation: any one of these patterns, waited for and
 	// insisted on exactly as eve_config.json says. Spelling those two out
 	// at every call site would only invite one of them to drift.
@@ -610,27 +629,27 @@ cv::Point Program::click(
 	wanted.timeout = common().CONFIRM_TIMEOUT;
 	wanted.retries = common().ACTION_RETRIES;
 
-	const ImagePattern& pattern = context().images(image);
-	const cv::Point target =
-		corner + cv::Point {pattern.width() / 2, pattern.height() / 2};
-
 	ClickReport report;
 	std::string trouble;
 	const Click clicked = confirmed_click(
-		context(), target, UI_WAIT_DEFAULT, wanted,
-		[this] { return stopping(); }, report, trouble
+		context(),
+		target,
+		UI_WAIT_DEFAULT,
+		wanted,
+		[this] { return stopping(); },
+		report,
+		trouble
 	);
-	if (Click::CONFIRMED == clicked) return report.at;
-	if (Click::DONE == clicked)      return report.click.frame;
+	if (Click::CONFIRMED == clicked)   return;
+	if (Click::DONE == clicked)        return;
 	if (Click::STOPPED == clicked)     stopped_while("clicking " + what);
 	if (Click::UNCONFIRMED == clicked) fail(what + " did not take: " + trouble);
 	fail("cannot click " + what + ": " + trouble);
 }
 
-cv::Point Program::click(
-	const std::string& what, size_t image, const cv::Point& corner) const
+void Program::click(const std::string& what, size_t image) const
 {
-	return click(what, image, corner, std::vector<size_t> {});
+	click(what, image, std::vector<size_t> {});
 }
 
 ProgramRunner::~ProgramRunner()

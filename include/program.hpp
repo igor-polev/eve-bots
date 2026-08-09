@@ -515,6 +515,11 @@ protected:
 	bool sighted(
 		const std::string&        what,
 		size_t                    image,
+		std::chrono::milliseconds budget
+	) const;
+	bool sighted(
+		const std::string&        what,
+		size_t                    image,
 		std::chrono::milliseconds budget,
 		cv::Point&                at
 	) const;
@@ -525,28 +530,29 @@ protected:
 		Sighting&                  seen
 	) const;
 
-	// Clicks the middle of a pattern sitting at corner - the corner is
-	// where a match starts, the middle is what a person would aim at - and
-	// insists the game show the click was taken. Any one of confirm
-	// appearing is that proof, waited for and clicked again for exactly as
-	// eve_config.json says.
+	// Finds a pattern and clicks the middle of it - a match is reported by
+	// the corner it starts at, and the middle is what a person would aim
+	// at - then insists the game show the click was taken. Any one of
+	// confirm appearing is that proof, waited for and clicked again for
+	// exactly as eve_config.json says.
 	//
-	// Returns where the proof turned up, which is usually the next thing
-	// to click: a confirmation search has already found it and knows where
-	// it is, so looking for it again would be asking twice.
-	cv::Point click(
+	// Where it is, is looked up here rather than passed in. A caller
+	// holding a position found a moment ago is holding where the thing
+	// was, and a panel that has scrolled since would have the click press
+	// whatever moved into that spot. The look costs little: every pattern
+	// holds still along at least one axis, so it is a small box search
+	// around the last hit rather than another pass over the frame. It gets
+	// common().ACTION_TIMEOUT to find it in.
+	void click(
 		const std::string&         what,
 		size_t                     image,
-		const cv::Point&           corner,
 		const std::vector<size_t>& confirm
 	) const;
-	// The same click with nothing to confirm it. Returns where it landed.
-	// A button pressed and never checked is the usual reason a program
-	// wanders off doing nothing, so this is for the few places where
-	// there is genuinely nothing to look for.
-	cv::Point click(
-		const std::string& what, size_t image, const cv::Point& corner
-	) const;
+	// The same click with nothing to confirm it. A button pressed and
+	// never checked is the usual reason a program wanders off doing
+	// nothing, so this is for the few places where there is genuinely
+	// nothing to look for.
+	void click(const std::string& what, size_t image) const;
 
 private:
 	friend class Doing;

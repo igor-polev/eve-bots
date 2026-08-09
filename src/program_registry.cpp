@@ -8,8 +8,8 @@
 #include <memory>
 
 #include "prg/prg_autopilot.hpp"
-#include "prg/prg_registry.hpp"
 #include "prg/prg_undock.hpp"
+#include "program_registry.hpp"
 
 void add_programs(ProgramRunner& runner)
 {

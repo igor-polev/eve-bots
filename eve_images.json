@@ -78,6 +78,12 @@
             "FILE"            : "icn_station.png",
             "COMMENT"         : "Station icon",
             "FIXED_DIRECTIONS": "X"
+        },
+        {
+            "NAME"            : "refinery_route",
+            "FILE"            : "icn_refinery_route.png",
+            "COMMENT"         : "(Large) refinery icon in route",
+            "FIXED_DIRECTIONS": "X"
         }
     ]
 }

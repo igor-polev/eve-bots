@@ -68,10 +68,10 @@ protected:
 private:
 	// One hop. True when that hop was the last one and the ship is docked.
 	bool fly_hop();
-	// What the route panel says is next, waited for until it says
-	// something. Which icon it turned out to be is the whole of the
-	// difference between the two kinds of hop.
-	Sighting next_waypoint();
+	// Which icon the route panel says is next, waited for until it says
+	// something. That is the whole of the difference between the two kinds
+	// of hop; where it sits is the click's business, not ours.
+	size_t next_waypoint();
 
 	// What this program works with, named as eve_images.json names it.
 	Pattern GATE {*this, "gate_route"};

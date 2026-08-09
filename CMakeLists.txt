@@ -25,7 +25,7 @@ add_executable(${PROJECT_NAME}
     src/mouse_input.cpp
     src/program_params.cpp
     src/program.cpp
-    src/prg/prg_registry.cpp
+    src/program_registry.cpp
     src/prg/prg_undock.cpp
     src/prg/prg_autopilot.cpp
 )

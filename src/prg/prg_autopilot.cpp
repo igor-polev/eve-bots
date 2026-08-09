@@ -61,23 +61,21 @@ ProgramResult AutopilotProgram::run()
 	}
 }
 
-Program::Sighting AutopilotProgram::next_waypoint()
+size_t AutopilotProgram::next_waypoint()
 {
 	const Budget reading {DESTINATION_TIMEOUT};
 	while (true) {
-		Sighting seen;
 		// The gate first, because it is the common case by far.
-		if (sighted("the route panel", GATE, reading.left(), seen.at)) {
-			seen.image = GATE;
-			return seen;
-		}
+		if (sighted("the route panel", GATE, reading.left())) return GATE;
+
 		// Either station icon will do, so both go into one search rather
 		// than costing a pass each.
+		Sighting seen;
 		if (sighted("the route panel", STATIONS, reading.left(), seen))
-			return seen;
+			return seen.image;
 
 		if (reading.left() <= std::chrono::milliseconds::zero())
-			fail("nothing in the route panel to fly to");
+			fail("nothing in the OV panel to fly to");
 		pause(RECHECK_INTERVAL, "the route panel to say what is next");
 	}
 }
@@ -87,21 +85,19 @@ bool AutopilotProgram::fly_hop()
 	// Which waypoint is next decides everything that follows: which
 	// command to give, how long to wait once warp ends, and whether
 	// arriving means the route is finished.
-	const Sighting next = next_waypoint();
+	const size_t next = next_waypoint();
 
-	const bool        to_station = GATE.index() != next.image;
-	const std::string where      = to_station ? "the station" : "the gate";
-	const Pattern&    command    = to_station ? DOCK : JUMP;
-	const std::string press =
-		std::string("the '") + command.name() + "' button";
+	const bool        to_station {GATE.index() != next};
+	const std::string where      {to_station ? "the station" : "the gate"};
+	const Pattern&    command    {to_station ? DOCK : JUMP};
+	const std::string press      {std::string("the '") + command.name() + "' button"};
 
 	// Selecting the waypoint brings up the command button for that kind of
-	// hop, so that button is both the proof the click was taken and the
-	// thing the next step has to press.
-	const cv::Point button = click(where, next.image, next.at, {command});
-	// And pressing it has to put the warp vector message on screen, which
-	// is the difference between a command taken and one swallowed.
-	click(press, command, button, {WARP_VECTOR});
+	// hop, which is the proof the click was taken.
+	click(where, next, {command});
+	// And pressing that has to put the warp vector message on screen,
+	// which is the difference between a command taken and one swallowed.
+	click(press, command, {WARP_VECTOR, WARP});
 
 	// Warp is watched from both sides on one budget: it has to start,
 	// which says the ship really is on its way, and then end, which says
