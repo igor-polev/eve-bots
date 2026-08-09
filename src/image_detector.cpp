@@ -84,6 +84,12 @@ bool ImageDetector::start(
 
 	m_library = &library;
 	m_capture = &capture;
+	// Nothing carried over from a previous run: those answers were about
+	// another client's frames, and the timestamps would never match again
+	// anyway.
+	m_frame = Frame {};
+	m_memo.clear();
+	m_memo_frame = std::chrono::steady_clock::time_point {};
 	m_running.store(true);
 	try {
 		m_thread = std::thread {&ImageDetector::detect_loop, this};
@@ -107,6 +113,11 @@ void ImageDetector::stop()
 	m_wake.notify_all();
 	m_done.notify_all();
 	if (m_thread.joinable()) m_thread.join();
+	// Safe only now that the thread that owns them is gone, and worth
+	// doing for the frame alone: that is megabytes held for nothing.
+	m_frame = Frame {};
+	m_memo.clear();
+	m_memo_frame = std::chrono::steady_clock::time_point {};
 }
 
 bool ImageDetector::detect(
@@ -451,32 +462,92 @@ void ImageDetector::search_area(
 	}
 }
 
+namespace {
+
+// How long ago a frame was taken.
+std::chrono::milliseconds since_taken(const Frame& frame)
+{
+	return std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::steady_clock::now() - frame.taken
+	);
+}
+
+} // namespace
+
+std::chrono::milliseconds ImageDetector::frame_life() const
+{
+	const unsigned rate = m_capture ? m_capture->frame_rate() : 0;
+	// No rate to go on means capture is not running, and nothing will be
+	// answered anyway; a second is long enough to be harmless.
+	if (0 == rate) return std::chrono::milliseconds {1000};
+	return std::chrono::milliseconds {std::max(1u, 1000 / rate)};
+}
+
 void ImageDetector::run_match(
 	const std::vector<size_t>& images,
 	int                        max_hits,
 	bool                       quick_only,
 	Detection&                 result,
-	std::string&               error) const
+	std::string&               error)
 {
 	if (!m_capture->running()) {
 		error = "capture is not running; use 'start' first";
 		return;
 	}
-	// A detection asked for right after 'start' would otherwise fail: the
-	// window has to redraw before Graphics Capture hands over anything.
-	// The wait sits on the detection thread, so nothing else is held up.
-	Frame frame = m_capture->latest_frame();
-	for (std::chrono::milliseconds waited {0};
-	     frame.empty() && waited < FIRST_FRAME_WAIT && m_running.load();
-	     waited += FRAME_POLL_STEP)
-	{
-		std::this_thread::sleep_for(FRAME_POLL_STEP);
-		frame = m_capture->latest_frame();
+	// Capture hands a frame over by value, so asking for one copies every
+	// pixel of it - the cost the whole of this is trying to avoid. A frame
+	// younger than the interval capture runs at is still the newest there
+	// can be, so it is kept and asked about again instead of replaced.
+	const std::chrono::milliseconds life = frame_life();
+	if (m_frame.empty() || since_taken(m_frame) >= life) {
+		// A detection asked for right after 'start' would otherwise fail:
+		// the window has to redraw before Graphics Capture hands over
+		// anything. The wait sits on the detection thread, so nothing else
+		// is held up.
+		Frame newest = m_capture->latest_frame();
+		for (std::chrono::milliseconds waited {0};
+		     newest.empty() && waited < FIRST_FRAME_WAIT && m_running.load();
+		     waited += FRAME_POLL_STEP)
+		{
+			std::this_thread::sleep_for(FRAME_POLL_STEP);
+			newest = m_capture->latest_frame();
+		}
+		// Capture handing back what we already have is not a reason to
+		// throw away what we know about it.
+		if (!newest.empty()) m_frame = std::move(newest);
 	}
-	if (frame.empty()) {
+	if (m_frame.empty()) {
 		error = "no frame captured yet - is the window minimised?";
 		return;
 	}
+	const Frame& frame = m_frame;
+
+	// A frame that is not the one everything was remembered about makes
+	// all of it worthless at a stroke: those answers were about pixels
+	// that no longer exist.
+	if (frame.taken != m_memo_frame) {
+		m_memo.clear();
+		m_memo_frame = frame.taken;
+	}
+	// Whether this frame can still be spoken for is settled once, here, so
+	// that a search long enough to outlive the frame it ran on does not
+	// then refuse to record what it found. The window is wider than the
+	// one above on purpose: that one asks "is there likely to be a newer
+	// frame", this one asks "has capture stopped producing them at all",
+	// and only the second is a reason to distrust what we already know.
+	const bool fresh = since_taken(frame) < MEMO_FRAME_LIVES * life;
+
+	if (fresh) {
+		for (const Remembered& memo : m_memo) {
+			if (!memo.answers(images, max_hits, quick_only)) continue;
+			// The same question, the same pixels. Searching again would
+			// spend anything up to two seconds arriving back here.
+			result = memo.answer;
+			result.remembered = true;
+			return;
+		}
+	}
+
 	for (const size_t image : images) {
 		const ImagePattern& pattern = (*m_library)(image);
 		if (pattern.width()  > static_cast<int>(frame.width) ||
@@ -495,7 +566,9 @@ void ImageDetector::run_match(
 	// The frame is our own copy, so wrapping it costs nothing; the cast is
 	// only needed because cv::Mat has no const-pointer constructor.
 	const cv::Mat captured {
-		static_cast<int>(frame.height), static_cast<int>(frame.width), CV_8UC4,
+		static_cast<int>(frame.height),
+		static_cast<int>(frame.width),
+		CV_8UC4,
 		const_cast<uint8_t*>(frame.pixels.data()),
 		static_cast<size_t>(frame.stride())
 	};
@@ -583,4 +656,11 @@ void ImageDetector::run_match(
 	);
 	if (static_cast<int>(result.hits.size()) > max_hits)
 		result.hits.resize(static_cast<size_t>(max_hits));
+
+	// Kept whole rather than picked apart per pattern: handing back what
+	// this search actually produced is exact, where rebuilding an answer
+	// out of remembered pieces would be a second implementation of the
+	// search to keep in step with this one.
+	if (fresh && m_memo.size() < MEMO_MAX)
+		m_memo.push_back(Remembered {images, max_hits, quick_only, result});
 }

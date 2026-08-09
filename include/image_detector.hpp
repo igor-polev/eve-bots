@@ -12,6 +12,35 @@
 	Callers hand over a request and wait for the answer. Only one search
 	runs at a time - the frame is shared and the work is CPU bound, so
 	queueing several would slow all of them down.
+
+	Every answered request is kept until the frame it was answered from is
+	replaced. Asking the same question of the same pixels a second time
+	cannot come to anything different, so it is not asked again - it is
+	looked up. That is not a guess about how fast the game changes: it is
+	the same arithmetic on the same input, and the saving is whatever the
+	search would have cost, from twenty milliseconds to two seconds.
+
+	This is what lets a program stop carrying positions around between one
+	action and the next. Finding a button and then clicking it are two
+	searches a few microseconds apart, and at any sane frame rate they fall
+	inside one frame, so the second one costs nothing. Deciding where to
+	look and what may be skipped belongs here, where the frames and the
+	remembered positions are, rather than in the programs.
+
+	The frame itself is kept for the same reason. Capture hands one over by
+	value - every pixel copied - so a frame younger than the interval
+	capture is running at is not replaced: it is still the newest there can
+	be, and asking for it again would cost the copy and throw away
+	everything known about it for nothing.
+
+	Both windows are measured from the frame's timestamp against the rate
+	capture says it is running at, read afresh each time so a rate changed
+	while running is taken into account. They answer different questions.
+	One frame's worth asks "could there be a newer frame by now", and is
+	when to go and look. Twice that asks "has capture stopped producing
+	them", and is when to stop letting remembered answers stand in for a
+	fresh search - because past that, a delivery has certainly been missed
+	and the pixels in hand are no longer what is on screen.
 */
 
 #pragma once
@@ -24,6 +53,7 @@
 #include <thread>
 #include <vector>
 
+#include "frame.hpp"
 #include "image_library.hpp"
 #include "position_cache.hpp"
 #include "screen_capture.hpp"
@@ -64,6 +94,10 @@ struct Detection {
 	// given, whether or not it turned anything up - and whether or not it
 	// was looked for at all, since one pattern answering spares the rest.
 	std::vector<PatternSearch> searched;
+	// Nothing was searched for this answer: the same question had already
+	// been asked of the same frame, and this is what it came to then. What
+	// searched says is what was done that first time.
+	bool                       remembered {false};
 };
 
 class ImageDetector {
@@ -77,6 +111,16 @@ public:
 	// whole 3440x1392 frame measured 3.6 s unmasked and 10.3 s masked, so
 	// this is a safety net against a wedged thread, not a working budget.
 	static constexpr std::chrono::milliseconds DEFAULT_TIMEOUT {30000};
+
+	// How long an answer keeps standing in for a search, in frames at the
+	// rate capture is running at. One frame is how long the newest frame
+	// is expected to stay the newest; past two, a delivery has certainly
+	// been missed, so capture is behind or has stopped and the pixels
+	// being answered from are no longer what is on screen.
+	static constexpr int MEMO_FRAME_LIVES = 2;
+	// Distinct questions kept about one frame. Any program asking more
+	// than this about a single frame is looping, not looking.
+	static constexpr size_t MEMO_MAX = 16;
 
 	// Slack a quick search leaves around the remembered position when
 	// eve_images.json asks for none, as a fraction of the pattern's longer
@@ -173,15 +217,39 @@ public:
 	std::string names_text(const std::vector<size_t>& images) const;
 
 private:
+	// One request that has already been answered, and what it came to.
+	// The whole request is the key rather than the patterns alone: how
+	// many hits were wanted and whether a full frame search was allowed
+	// both change the answer, so a question that differs in either of them
+	// is a different question and gets asked properly.
+	struct Remembered {
+		std::vector<size_t> images;
+		int                 max_hits   {0};
+		bool                quick_only {false};
+		Detection           answer;
+
+		bool answers(
+			const std::vector<size_t>& wanted, int hits, bool quick) const
+		{
+			return max_hits == hits && quick_only == quick && images == wanted;
+		}
+	};
+
 	void detect_loop();
-	// Runs one search. Reports trouble through error rather than throwing.
+	// Runs one search, or hands back the answer to the same question about
+	// the same frame. Reports trouble through error rather than throwing.
 	void run_match(
 		const std::vector<size_t>& images,
 		int                        max_hits,
 		bool                       quick_only,
 		Detection&                 result,
 		std::string&               error
-	) const;
+	);
+
+	// How long capture says one frame lasts. Read from the capture on
+	// every call rather than kept, so a frame rate changed while running
+	// needs nothing done about it here.
+	std::chrono::milliseconds frame_life() const;
 
 	// Searches one rectangle of a BGRA frame for one pattern. Hits come
 	// back in frame coordinates, best match first, replacing whatever was
@@ -242,4 +310,12 @@ private:
 
 	Detection   m_result;
 	std::string m_result_error;
+
+	// The frame being worked from, kept rather than fetched afresh every
+	// time, and everything already asked about it. Touched only by the
+	// detection thread, and by start() and stop() while there is no such
+	// thread, so they need no lock of their own.
+	Frame                                 m_frame;
+	std::chrono::steady_clock::time_point m_memo_frame {};
+	std::vector<Remembered>               m_memo;
 };

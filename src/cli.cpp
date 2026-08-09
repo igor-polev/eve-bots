@@ -624,11 +624,16 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 	// was looked for in its own way and gets a line of its own below.
 	std::string where, mistaken;
 	if (!several) {
-		where = ", searched " + scope_text(found.searched.front());
+		// A remembered answer searched nothing at all this time round, so
+		// the scope belongs to the search that first produced it.
+		where = (found.remembered ? ", remembered from " : ", searched ")
+		      + scope_text(found.searched.front());
 		const std::string claimed =
 			mistaken_text(found.searched.front().mistaken);
 		if (!claimed.empty()) mistaken = ", " + claimed;
 	}
+	else if (found.remembered)
+		where = ", remembered from the last search of this frame";
 
 	if (found.hits.empty()) {
 		std::cout << what << " not found ("

@@ -391,6 +391,10 @@ void ScreenCapture::store_frame(
 	Frame frame;
 	frame.width  = width;
 	frame.height = height;
+	// Stamped here, which is as close to the moment of capture as this
+	// side of the pool can get: the pixels are about to be read out of the
+	// texture that was just handed over.
+	frame.taken  = std::chrono::steady_clock::now();
 	frame.pixels.resize(static_cast<size_t>(width) * height * 4);
 
 	const auto*  src = static_cast<const uint8_t*>(mapped.pData);
