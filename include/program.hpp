@@ -4,38 +4,21 @@
 
 	Program - one automated job, and the runner that hosts it.
 
-	A program is whatever a person would otherwise do by hand: undock,
-	mine an asteroid, fly a route. It runs on its own thread so the console
-	stays usable while it works, and it reports back an outcome and a line
-	of text explaining what happened.
+	A program runs on its own thread and reports back an outcome and a line
+	of text. Stopping is cooperative: abort() raises a flag the program
+	notices at its next action, since a thread torn down mid-click would
+	leave the mouse button held.
 
-	Stopping is cooperative. A program cannot be killed outright - a thread
-	torn down mid-click would leave the mouse button held and the detector
-	waiting - so ProgramRunner::abort() only raises a flag, and the program
-	notices it at its next check point. Since the longest thing a program
-	waits for is one image search, that is the granularity of a stop.
-
-	Everything below Program exists so that a program can be written as a
-	sequence of actions and nothing else. Three things are moved out of the
-	programs to make that possible:
-
-	    what has to be true first  exec() checks the capture is running and
-	                               turns every declared Pattern into a
-	                               library index before run() starts
-	    what to do when it fails   the actions throw ProgramError; nothing
-	                               is returned to be tested, and the stop
-	                               flag is never polled by a program
-	    what can be tuned          declared parameters read themselves out
-	                               of prog_params.json and list themselves
-	                               for the console
-
-	So a program says what it does, and this file says what happens when
-	the game does not agree.
+	Everything here exists so that a program body can be a sequence of
+	actions and nothing else. The actions throw ProgramError instead of
+	returning anything to test, exec() checks what has to be true before the
+	first one, and declared parameters read themselves out of
+	prog_params.json.
 */
 
 #pragma once
+
 #include <atomic>
-#include <chrono>
 #include <functional>
 #include <map>
 #include <memory>
@@ -45,6 +28,7 @@
 #include <thread>
 #include <vector>
 
+#include "common_defs.hpp"
 #include "image_detector.hpp"
 #include "image_library.hpp"
 #include "mouse_input.hpp"
@@ -52,14 +36,8 @@
 #include "program_params.hpp"
 #include "screen_capture.hpp"
 
-using ProgramClock = std::chrono::steady_clock;
-
-// How long ago something happened.
-std::chrono::milliseconds since(ProgramClock::time_point start);
-
-// Everything a program is allowed to touch. The three big ones are held
-// by reference, so the objects behind them must outlive any run; the
-// defaults are three numbers and are simply carried along.
+// Everything a program is allowed to touch. The three big ones are held by
+// reference, so the objects behind them must outlive any run.
 struct ProgramContext {
 	ImageLibrary&        images;
 	ImageDetector&       detector;
@@ -81,19 +59,8 @@ struct ProgramResult {
 	std::string description;
 };
 
-/*
-	How a program gives up.
-
-	Every way a run can end short of finishing is thrown rather than
-	returned, so a program body is a sequence of actions with nothing
-	between them: no result to test, no branch to take, no stop flag to
-	poll. The actions themselves throw this when the game does not do what
-	they asked, and exec() turns it back into a ProgramResult - so it never
-	leaves the program thread, and nothing outside prg/ has to catch it.
-
-	The two ways out are the two that are not success: FAILURE, which
-	carries the reason, and STOPPED, which is somebody having asked.
-*/
+// How a program gives up. Thrown by the actions and turned back into a
+// ProgramResult by exec(), so it never leaves the program thread.
 class ProgramError : public std::runtime_error {
 public:
 	ProgramError(ProgramExit exit, const std::string& why)
@@ -106,8 +73,8 @@ private:
 };
 
 // Declares one tunable of a program: its kind, its name, and what it is
-// without prog_params.json. The name is written out as the key as well,
-// so the two cannot come apart.
+// without prog_params.json. The name is written out as the key as well, so
+// the two cannot come apart.
 #define PROG_PARAM(kind, NAME, fallback) kind NAME {*this, #NAME, fallback}
 
 class Program {
@@ -121,31 +88,22 @@ public:
 
 	// One line for the 'programs' listing.
 	virtual std::string purpose() const = 0;
-	// What this run will use, after configure() - also for the listing.
-	// Every declared parameter with its value, the ones the file set
+	// Every declared parameter with its value, the ones prog_params.json set
 	// marked with a star.
 	std::string settings_text() const;
-	// Takes whatever this program understands out of prog_params.json.
-	// Anything the file does not mention keeps its built in default; a
-	// value that is there but unusable is an error, because a parameter
-	// that silently fails to apply is worse than a refusal to start.
-	//
-	// Every declared parameter is read here, so most programs need nothing
-	// of their own; one built out of another overrides this to pass the
-	// file on to it as well.
+	// Takes whatever this program understands out of prog_params.json. A
+	// value that is there but unusable is an error: a parameter that
+	// silently fails to apply is worse than a refusal to start. One program
+	// built out of another overrides this to pass the file on as well.
 	virtual bool configure(const ProgramParams& params, std::string& error);
 
-	// Does the job. Called on the program thread by ProgramRunner.
-	//
-	// Everything that has to be true before the first action is checked
-	// here rather than by each program: the capture has to be running, and
-	// every pattern the program declared has to be in the library. Only
-	// then is run() called, with the context already in place.
+	// Does the job. Called on the program thread by ProgramRunner. Checks
+	// the capture is running and resolves every declared pattern before
+	// run() starts.
 	ProgramResult exec(ProgramContext& context);
 
-	// Asks a running exec() to give up at its next check point. Virtual
-	// because a program built out of other programs has to pass this on
-	// to whichever one is doing the work for it.
+	// Asks a running exec() to give up at its next action. Virtual because a
+	// program built out of others has to pass this on to them.
 	virtual void request_stop() noexcept { m_stop.store(true); }
 	bool stopping() const noexcept { return m_stop.load(); }
 
@@ -154,18 +112,15 @@ public:
 
 protected:
 	/*
-		A pattern the program works with, declared as a member and named
-		the way eve_images.json names it:
+		A pattern the program works with, declared as a member and named the
+		way eve_images.json names it:
 
 		    Pattern  UNDOCK   {*this, "undock"};
 		    Patterns STATIONS {*this, {"station_route", "station_home_route"}};
 
-		Each one registers itself as it is built, exec() turns every name
-		into a library index before run() starts, and from then on the
-		member stands in for that index wherever a search or a click asks
-		for one. Declaring rather than looking up means a misspelt or
-		missing image is one message before the first action instead of a
-		surprise halfway through a route.
+		Each registers itself as it is built and exec() turns every name into
+		a library index, so a misspelt image is one message before the first
+		action rather than a surprise halfway through a route.
 	*/
 	class PatternDecl {
 	public:
@@ -184,8 +139,7 @@ protected:
 			ImageLibrary& images, std::vector<std::string>& missing) = 0;
 	};
 
-	// One image. Stands in for its library index, and knows its own name
-	// for whatever a program has to say about it.
+	// One image, standing in for its library index.
 	class Pattern : public PatternDecl {
 	public:
 		Pattern(Program& owner, const char* name)
@@ -227,30 +181,21 @@ protected:
 
 		    PROG_PARAM(Timeout,  DESTINATION_TIMEOUT,  10000);
 		    PROG_PARAM(Interval, WARP_RECHECK_INTERVAL, 2000);
-		    PROG_PARAM(Pause,    GATE_JUMP_PAUSE,       5000);
 
-		The member name is also the key in prog_params.json - the macro
-		writes it out - and also what a failure calls it, so there is one
-		name for one number and nowhere for the three to drift apart. The
-		number beside it is what the program does without the file. Both
-		configure() and the 'programs' listing are built out of these, so
-		declaring a parameter is all there is to adding one.
+		The member name is also the key in prog_params.json and also what a
+		failure calls it, so the three cannot drift apart.
 
-		Which of the four kinds it is says what it costs to run:
+		Which kind it is says what it costs to run:
 
-		    Pause     time the program really spends, every time, whether
-		              or not anything was going to happen. The first thing
-		              to look at when a program feels slow.
-		    Interval  the gap between two looks at the same thing. Spent
-		              over and over, but only while the wait lasts.
-		    Timeout   an upper bound. Only ever paid when something has
-		              gone wrong, so raising one costs nothing until it
-		              does.
-		    Count     how many times to try something.
+		    Pause     time really spent, every time, whether or not anything
+		              was going to happen
+		    Interval  the gap between two looks at the same thing
+		    Timeout   an upper bound, only ever paid when something is wrong
+		    Count     how many times to try something
 
 		The kind and the name have to agree - a Pause has to be called
-		something_PAUSE - and configure() refuses to start a program whose
-		names say something different from what its code does.
+		something_PAUSE - and configure() refuses a program whose names say
+		something different from what its code does.
 	*/
 	class ParamDecl {
 	public:
@@ -269,8 +214,8 @@ protected:
 
 	private:
 		friend class Program;
-		// Takes this program's value out of the file, or keeps the built
-		// in one. False and error when what the file says cannot be used.
+		// Takes this program's value out of the file, or keeps the built in
+		// one. False and error when what the file says cannot be used.
 		virtual bool read(
 			const ProgramParams& params,
 			const std::string&   program,
@@ -284,12 +229,11 @@ protected:
 		const char* m_key;
 	};
 
-	// The three kinds that are a length of time. Stands in for its value
-	// wherever milliseconds are wanted.
+	// The three kinds that are a length of time.
 	class Millis : public ParamDecl {
 	public:
-		std::chrono::milliseconds value() const noexcept { return m_value; }
-		operator std::chrono::milliseconds() const noexcept { return m_value; }
+		eb::Millis value() const noexcept { return m_value; }
+		operator eb::Millis() const noexcept { return m_value; }
 
 	protected:
 		Millis(Program& owner, const char* key, long long fallback)
@@ -305,7 +249,7 @@ protected:
 		// The smallest value that still means something.
 		virtual long long least() const = 0;
 
-		std::chrono::milliseconds m_value;
+		eb::Millis m_value;
 	};
 
 	class Timeout : public Millis {
@@ -341,8 +285,8 @@ protected:
 		long long   least()  const override { return 1; }
 	};
 
-	// A yes or no. Its name says what it turns on rather than what it
-	// costs to run, so there is no ending for it to have.
+	// A yes or no. Its name says what it turns on rather than what it costs
+	// to run, so there is no ending for it to have.
 	class Flag : public ParamDecl {
 	public:
 		Flag(Program& owner, const char* key, bool fallback)
@@ -384,9 +328,9 @@ protected:
 		int m_value;
 	};
 
-	// What every program starts from, for the numbers that are the same
-	// everywhere: read as common().CONFIRM_TIMEOUT, so that a value from
-	// eve_config.json never looks like one of this program's own.
+	// The numbers that are the same everywhere, read as
+	// common().CONFIRM_TIMEOUT so a value from eve_config.json never looks
+	// like one of this program's own.
 	const ProgramDefaults& common() const noexcept
 		{ return context().defaults; }
 
@@ -394,34 +338,32 @@ protected:
 	// before the first action. Most have nothing to do here.
 	virtual bool prepare(std::string& error);
 
-	// Does the job. The context is already in place, so nothing has to be
-	// handed along from call to call.
+	// Does the job. The context is already in place.
 	virtual ProgramResult run() = 0;
 
 	// What the program is allowed to touch, for the run in flight. Only
-	// valid inside exec(), which is to say inside run() and below.
+	// valid inside exec().
 	ProgramContext& context() const noexcept { return *m_context; }
 
 	// A stretch of time shared by more than one wait. Each of them takes
-	// what is left rather than the whole of it, so two waits that belong
-	// to the same thing cannot together outlast it.
+	// what is left rather than the whole of it, so two waits that belong to
+	// the same thing cannot together outlast it.
 	class Budget {
 	public:
-		explicit Budget(std::chrono::milliseconds total)
-			: m_total {total}, m_began {ProgramClock::now()} {}
+		explicit Budget(eb::Millis total)
+			: m_total {total}, m_began {eb::Clock::now()} {}
 
-		std::chrono::milliseconds total() const noexcept { return m_total; }
-		std::chrono::milliseconds left()  const;
+		eb::Millis total() const noexcept { return m_total; }
+		eb::Millis left()  const;
 
 	private:
-		std::chrono::milliseconds m_total;
-		ProgramClock::time_point  m_began;
+		eb::Millis    m_total;
+		eb::TimePoint m_began;
 	};
 
 	/*
 		Names the stretch of work in flight, so that every failure thrown
-		underneath it says where it happened and no message has to repeat
-		it by hand:
+		underneath it says where it happened:
 
 		    Doing note {*this, hop_text(hop)};   // "hop 3: ..."
 
@@ -439,7 +381,6 @@ protected:
 	};
 
 	// Where something was seen, and which pattern it turned out to be.
-	// The pattern matters when several were asked for at once.
 	struct Sighting {
 		cv::Point at;
 		size_t    image {0};
@@ -457,51 +398,37 @@ protected:
 		---- actions --------------------------------------------------------
 
 		What a program is made of. Every one of them insists: if the game
-		does not do what it was asked, the program is over, and saying so is
-		this layer's job rather than the caller's.
+		does not do what it was asked, the program is over.
 
 		Each takes a phrase naming what it is working on, written the way a
-		person would say it - "the undock button", "the warp message". That
-		phrase is what the failure will be reported in terms of, which is
-		why it is spelt out at the call site rather than derived from a
-		pattern name: what the program was trying to do is not the same as
-		which image it happened to be looking at.
+		person would say it - "the undock button", "the warp message" - and
+		that is what a failure is reported in terms of. It is spelt out at
+		the call site rather than derived from a pattern name because what
+		the program was trying to do is not the same as which image it
+		happened to be looking at.
+
+		Several images mean "any of these will do": one search that looks at
+		the quick boxes of all of them before hunting any across the whole
+		frame, which is not what looking for each in turn would do.
 	*/
 
-	// Time spent on purpose, watching nothing. what says what it is being
-	// given to - "the gate to load" - and is only ever heard when a stop
-	// arrives in the middle of it.
-	//
-	// Only a Pause or an Interval will do: time the program spends doing
-	// nothing is the one thing it should never be able to do by accident.
+	// Time spent on purpose, watching nothing. Only a Pause or an Interval
+	// will do: time a program spends doing nothing is the one thing it
+	// should never be able to do by accident. what is only ever heard when a
+	// stop arrives in the middle of it.
 	void pause(const Pause& duration, const std::string& what) const;
-	// The gap before looking again, when the looking is the program's own
-	// rather than something an action does for it.
 	void pause(const Interval& duration, const std::string& what) const;
 
 	// Waits for something to turn up, and gives up if it does not.
-	// Returns where it was seen.
-	cv::Point appear(
-		const std::string&        what,
-		size_t                    image,
-		std::chrono::milliseconds budget
-	) const;
-	cv::Point appear(
-		const std::string& what, size_t image, const Budget& budget
-	) const;
-	// Any one of several will do - "a gate or a station", say. One search
-	// shares the budget honestly between them and looks at the quick boxes
-	// of all of them before hunting any across the whole frame, which is
-	// not what looking for each in turn would do.
 	Sighting appear(
 		const std::string&         what,
 		const std::vector<size_t>& images,
-		std::chrono::milliseconds  budget
+		eb::Millis                 budget
 	) const;
 
-	// Waits for something to go away again, looking once per pause: this
-	// is for waits measured in minutes, where searching on repeat would
-	// keep a core busy for the whole of it.
+	// Waits for something to go away again, looking once per recheck: this
+	// is for waits measured in minutes, where searching on repeat would keep
+	// a core busy for the whole of it.
 	void vanish(
 		const std::string& what,
 		size_t             image,
@@ -509,79 +436,49 @@ protected:
 		const Interval&    recheck
 	) const;
 
-	// Asks rather than insists, for the times when not finding something
-	// is an answer rather than a failure. Still gives up if the search
-	// itself cannot run, or if the program was stopped.
-	bool sighted(
-		const std::string&        what,
-		size_t                    image,
-		std::chrono::milliseconds budget
-	) const;
-	bool sighted(
-		const std::string&        what,
-		size_t                    image,
-		std::chrono::milliseconds budget,
-		cv::Point&                at
-	) const;
+	// Asks rather than insists, for when not finding something is an answer
+	// rather than a failure. Still gives up if the search itself cannot run,
+	// or if the program was stopped. seen may be null.
 	bool sighted(
 		const std::string&         what,
 		const std::vector<size_t>& images,
-		std::chrono::milliseconds  budget,
-		Sighting&                  seen
+		eb::Millis                 budget,
+		Sighting*                  seen = nullptr
 	) const;
 
-	// Finds a pattern and clicks the middle of it - a match is reported by
-	// the corner it starts at, and the middle is what a person would aim
-	// at - then insists the game show the click was taken. Any one of
-	// confirm appearing is that proof, waited for and clicked again for
-	// exactly as eve_config.json says.
+	// Finds a pattern and clicks the middle of it, then insists the game
+	// show the click was taken: any one of confirm appearing is that proof.
+	// An empty confirm leaves a plain click, for the few places where there
+	// is genuinely nothing to look for.
 	//
-	// Where it is, is looked up here rather than passed in. A caller
-	// holding a position found a moment ago is holding where the thing
-	// was, and a panel that has scrolled since would have the click press
-	// whatever moved into that spot. The look costs little: every pattern
-	// holds still along at least one axis, so it is a small box search
-	// around the last hit rather than another pass over the frame. It gets
-	// common().ACTION_TIMEOUT to find it in.
+	// Where it is, is looked up here rather than passed in: a caller holding
+	// a position found a moment ago is holding where the thing was, and a
+	// panel that has scrolled since would have the click press whatever
+	// moved into that spot.
 	void click(
 		const std::string&         what,
 		size_t                     image,
 		const std::vector<size_t>& confirm
 	) const;
-	// The same click with nothing to confirm it. A button pressed and
-	// never checked is the usual reason a program wanders off doing
-	// nothing, so this is for the few places where there is genuinely
-	// nothing to look for.
-	void click(const std::string& what, size_t image) const;
 
 private:
 	friend class Doing;
 
-	// Whatever Doing scopes are open, ready to be put in front of a
-	// message: "hop 3: ".
+	// Whatever Doing scopes are open, ready to be put in front of a message:
+	// "hop 3: ".
 	std::string note_text() const;
 
-	// What every appear() is made of.
-	Sighting watch_for(
-		const std::string&         what,
-		const std::vector<size_t>& images,
-		std::chrono::milliseconds  budget
-	) const;
-
 	// Turns every declared pattern into a library index. Returns the names
-	// the library did not have, ready to be read out, empty when all were
-	// found.
+	// the library did not have, empty when all were found.
 	std::string resolve_patterns(ImageLibrary& images);
 
-	// Every declared parameter by name, for saying what the file could
-	// have meant.
+	// Every declared parameter by name, for saying what the file could have
+	// meant.
 	std::string param_list() const;
 
 	// Sleeping without a Pause to point at, for the actions that wait on
 	// their own account.
-	void rest_or_stop(
-		std::chrono::milliseconds duration, const std::string& what
-	) const;
+	void rest_or_stop(eb::Millis duration, const std::string& what) const;
 
 	std::string               m_name;
 	std::atomic<bool>         m_stop {false};
@@ -590,25 +487,21 @@ private:
 	std::vector<std::string>  m_notes;      // the open Doing scopes
 	ProgramContext*           m_context {nullptr};
 
-	// Every program has this one, whether or not it declares anything
-	// else: the menu has room for a handful of entries and most programs
-	// are steps other programs are built out of, so a program is kept out
-	// of it until prog_params.json says otherwise. Declared after the list
-	// it registers itself with, which has to exist by then.
+	// Every program has this one: the menu has room for a handful of entries
+	// and most programs are steps others are built out of, so a program is
+	// kept out of it until prog_params.json says otherwise. Declared after
+	// the list it registers itself with, which has to exist by then.
 	PROG_PARAM(Flag, SHOW_IN_MENU, false);
 };
 
-/*
-	Holds the known programs and runs one at a time. One at a time because
-	they all drive the same game window: two programs clicking at once
-	would fight each other.
-*/
+// Holds the known programs and runs one at a time: they all drive the same
+// game window, and two clicking at once would fight each other.
 class ProgramRunner {
 public:
 	static constexpr size_t NOT_FOUND = static_cast<size_t>(-1);
 
-	// Called on the program thread the moment a run ends, so a finished
-	// job is reported without the console having to poll for it.
+	// Called on the program thread the moment a run ends, so a finished job
+	// is reported without the console having to poll for it.
 	using FinishHandler =
 		std::function<void(const std::string&, const ProgramResult&)>;
 
@@ -619,9 +512,8 @@ public:
 
 	void add(std::unique_ptr<Program> program);
 	void on_finish(FinishHandler handler) { m_on_finish = std::move(handler); }
-	// Hands every registered program its parameters. Setting up, so it
-	// belongs here rather than to whoever only reads the list afterwards.
-	// Stops at the first program that rejects what it was given.
+	// Hands every registered program its parameters, stopping at the first
+	// one that rejects what it was given.
 	bool configure(const ProgramParams& params, std::string& error);
 
 	bool   empty() const noexcept { return m_programs.empty(); }
@@ -638,12 +530,10 @@ public:
 	// Name of the program in flight, empty when none is.
 	std::string current() const;
 
-	// Starts a program on its own thread. False when one is already
-	// running. start(), abort() and wait() are asked for from both the
-	// console and the pop-up menu, which are different threads, so they
-	// share a lock of their own. A run in flight never takes it - it
-	// touches only m_running, m_current and the finish handler - so
-	// joining underneath it cannot deadlock.
+	// Starts a program on its own thread. False when one is already running.
+	// start(), abort() and wait() are asked for from both the console and
+	// the pop-up menu, so they share a lock of their own; a run in flight
+	// never takes it, so joining underneath it cannot deadlock.
 	bool start(
 		size_t program, const ProgramContext& context, std::string& error
 	);

@@ -4,34 +4,27 @@
 
 	ProgramDefaults - the numbers every program starts from.
 
-	Waiting for the interface to catch up is the same job wherever it
-	happens, and how long it takes is a property of the client and the
-	machine it runs on rather than of any one program. So these live in
-	eve_config.json beside the frame rate and the detection threshold,
-	and a program only names a timeout of its own when it wants something
-	other than the usual - a whole warp, say, which is nothing like the
-	wait for a button to light up.
+	How long the interface takes to catch up is a property of the client and
+	the machine rather than of any one program, so these live in
+	eve_config.json and a program only names a timeout of its own when it
+	wants something other than the usual.
 */
 
 #pragma once
-#include <chrono>
 
-// Named the way a program's own parameters are, and read through
-// common(), so that a call site says which of the two a number came from
-// without anybody having to go and look: MAX_JUMP_TIMEOUT is this
-// program's, common().CONFIRM_TIMEOUT is everybody's. The keys in
-// eve_config.json carry a _DEFAULT on the end to say the same thing from
-// the file's side.
+#include "common_defs.hpp"
+
+// Named the way a program's own parameters are, and read through common(),
+// so that a call site says which of the two a number came from:
+// MAX_JUMP_TIMEOUT is this program's, common().CONFIRM_TIMEOUT is
+// everybody's.
 struct ProgramDefaults {
 	// How long a program gives the interface to have something on screen
-	// when it has no reason to want longer. What spends it is the look a
-	// click makes for the thing it is about to press: that has been found
-	// a moment earlier at every call site there is, so this is the wait
-	// for a box search to come back, not for a button to be drawn.
-	std::chrono::milliseconds ACTION_TIMEOUT  {2000};
+	// when it has no reason to want longer.
+	eb::Millis ACTION_TIMEOUT  {2000};
 	// Confirming a click: how long the proof of it is waited for, per
 	// attempt.
-	std::chrono::milliseconds CONFIRM_TIMEOUT {3000};
+	eb::Millis CONFIRM_TIMEOUT {3000};
 	// Further clicks to make when that proof does not come.
-	int                       ACTION_RETRIES  {3};
+	int        ACTION_RETRIES  {3};
 };

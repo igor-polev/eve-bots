@@ -29,12 +29,9 @@ const Named MODIFIER_ORDER[] = {
 	{"Shift", MOD_SHIFT},  {"Win", MOD_WIN},
 };
 
-// The first spelling of each key is the canonical one, the one
-// hotkey_text hands back; the rest are alternatives it accepts.
-//
-// The punctuation keys are the OEM codes, which name a position on the
-// keyboard rather than a character. On a layout that prints something
-// else there, "`" still means the key left of '1'.
+// The first spelling of each key is the one hotkey_text hands back; the rest
+// are alternatives it accepts. The punctuation keys are OEM codes, which name
+// a position on the keyboard rather than a character.
 const Named KEY_NAMES[] = {
 	{"`", VK_OEM_3}, {"backquote", VK_OEM_3}, {"grave", VK_OEM_3},
 	{"tilde", VK_OEM_3},

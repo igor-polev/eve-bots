@@ -2,19 +2,17 @@
 	EVE bots for Windows.
 	Author: Igor Polev.
 
-	ImageLibrary - the set of patterns the detector can look for,
-	described by eve_images.json and stored as PNG files.
+	ImageLibrary - the set of patterns the detector can look for, described
+	by eve_images.json and stored as PNG files.
 
-	Patterns are used at their stored size: the capture resolution is
-	whatever the EVE window is, so reference images must be cut from a
-	screenshot taken at the resolution the bot will run at.
-
-	A pattern PNG may carry an alpha channel. Transparent pixels are turned
-	into a mask, so only the opaque part of the image has to match - that is
-	how a button can be recognised without its changing background.
+	Patterns are used at their stored size, so reference images must be cut
+	from a screenshot taken at the resolution the bot will run at. An alpha
+	channel becomes a mask, so only the opaque part has to match - that is
+	how a button is recognised without its changing background.
 */
 
 #pragma once
+
 #include <algorithm>
 #include <map>
 #include <mutex>
@@ -81,11 +79,9 @@ struct ImagePattern {
 	bool fixed_y() const noexcept { return 0 != (fixed_directions & FIXED_Y); }
 };
 
-/*
-	Patterns are addressed by their position in the library. A name costs a
-	map lookup, so it is resolved once - by index() or by the string
-	overloads below - and the index is what gets passed around afterwards.
-*/
+// Patterns are addressed by their position in the library: a name costs a
+// map lookup, so it is resolved once by index() and the index is what gets
+// passed around afterwards.
 class ImageLibrary {
 public:
 	static constexpr const wchar_t* FILE_NAME = L"eve_images.json";
@@ -158,37 +154,26 @@ public:
 	// name from outside - a command line, a bot script - goes through it.
 	size_t index(const std::string& name) const;
 
-	// The pattern itself. Like vector::operator[] the index is not checked,
-	// and neither is the name: library("typo") is a programming error, not
-	// a runtime one.
+	// The pattern itself. Like vector::operator[] the index is not checked.
 	const ImagePattern& operator()(size_t image) const
 		{ return m_patterns[image]; }
-	const ImagePattern& operator()(const std::string& name) const
-		{ return operator()(index(name)); }
 
 	// Comma separated list of the names, for error messages.
 	std::string name_list() const;
 
-	// Where a pattern was seen last, or NEVER_SEEN. Kept here rather than
-	// in the detector so that it outlasts any single search, and never
-	// cleared: a remembered corner stays the best guess for where an
-	// element will show up again, even after a search that missed.
-	// The detection thread writes these while the console thread reads
-	// them, so both accessors take a lock.
+	// "'jump'", "'jump' or 'dock'", "'a', 'b' or 'c'" - for messages about
+	// something that covered more than one pattern.
+	std::string names_text(const std::vector<size_t>& images) const;
+
+	// Where a pattern was seen last, or NEVER_SEEN. Kept here rather than in
+	// the detector so that it outlasts any single search, and never cleared:
+	// a remembered corner stays the best guess for where an element will
+	// show up again, even after a search that missed. Written from whichever
+	// thread searched and read from the console, so both take a lock.
 	cv::Point last_hit(size_t image) const;
-	cv::Point last_hit(const std::string& name) const
-	{
-		const size_t image = index(name);
-		return NOT_FOUND == image ? NEVER_SEEN : last_hit(image);
-	}
 
 	// Returns true when the remembered corner actually moved.
 	bool set_last_hit(size_t image, const cv::Point& corner);
-	bool set_last_hit(const std::string& name, const cv::Point& corner)
-	{
-		const size_t image = index(name);
-		return NOT_FOUND != image && set_last_hit(image, corner);
-	}
 
 	// Throws away every remembered position. Used when capture moves to a
 	// different client, whose panels are somewhere else entirely.

@@ -11,7 +11,6 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
-#include <thread>
 
 #include "cli.hpp"
 #include "png_writer.hpp"
@@ -20,9 +19,9 @@
 
 namespace {
 
-// 'dump' waits up to FRAME_WAIT_STEPS * FRAME_WAIT_STEP for a first frame.
-constexpr int FRAME_WAIT_STEPS = 40;
-constexpr std::chrono::milliseconds FRAME_WAIT_STEP {50};
+using SearchScope   = ImageDetector::SearchScope;
+using PatternSearch = ImageDetector::PatternSearch;
+using Detection     = ImageDetector::Detection;
 
 constexpr const char* HELP_TEXT =
 	"Available commands:\n"
@@ -47,7 +46,8 @@ constexpr const char* HELP_TEXT =
 	"                      A pattern with FIXED_DIRECTIONS that has been\n"
 	"                      found before is looked for near its last position\n"
 	"                      first; 'quick' searches only there and gives up\n"
-	"                      instead of scanning the whole frame\n"
+	"                      instead of scanning the whole frame, 'full'\n"
+	"                      scans the whole frame without looking there\n"
 	"    click <image> [options]\n"
 	"    click <x> <y> [options]\n"
 	"                      click the middle of a pattern, or a bare point in\n"
@@ -227,17 +227,7 @@ int Cli::run()
 			"system; 'start' will fail.\n";
 	}
 
-	std::string error;
-	m_detector.set_min_margine(m_settings.min_margine());
-	m_detector.set_cache(&m_positions);
-	if (!m_detector.start(m_images, m_capture, error)) {
-		std::cout << " [WARNING] Image detection is unavailable: "
-		          << error << "\n";
-	}
-	if (!load_programs()) {
-		m_detector.stop();
-		return -1;
-	}
+	if (!load_programs()) return -1;
 	load_menu();
 	autostart_capture();
 	std::cout << "Type 'help' for a list of commands.\n\n";
@@ -263,7 +253,6 @@ int Cli::run()
 		m_programs.abort();
 	}
 	m_programs.wait();
-	m_detector.stop();
 	m_capture.stop();
 	return 0;
 }
@@ -383,9 +372,7 @@ void Cli::cmd_start(const std::vector<std::string>& args)
 
 	const WindowInfo& target = m_windows[index];
 	std::string error;
-	if (!m_capture.start(
-			target.hwnd, m_settings.capture_frame_rate(), error))
-	{
+	if (!m_capture.start(target.hwnd, error)) {
 		std::cout << "   [ERROR] Failed to start capture: " << error << "\n";
 		return;
 	}
@@ -399,13 +386,9 @@ void Cli::follow_positions(const WindowInfo& target)
 {
 	// Cached positions belong to a frame size, so the frame itself has to
 	// say what that is - the window has several plausible rectangles and
-	// only one of them is what detections are measured in. The first frame
-	// lands a few milliseconds after 'start'.
-	Frame frame = m_capture.latest_frame();
-	for (int wait = 0; frame.empty() && wait < FRAME_WAIT_STEPS; ++wait) {
-		std::this_thread::sleep_for(FRAME_WAIT_STEP);
-		frame = m_capture.latest_frame();
-	}
+	// only one of them is what detections are measured in.
+	Frame frame;
+	m_capture.frame(frame);
 	if (frame.empty()) {
 		std::cout << " [WARNING] No frame yet, so positions cannot be "
 		             "restored or remembered; 'stop' and 'start' again once "
@@ -442,12 +425,13 @@ void Cli::cmd_stop()
 	std::cout << "Capture stopped.\n";
 }
 
-void Cli::cmd_status() const
+void Cli::cmd_status()
 {
 	if (!m_capture.running()) {
 		std::cout << "Capture: stopped.\n";
 	} else {
-		const Frame frame = m_capture.latest_frame();
+		Frame frame;
+		m_capture.frame(frame);
 		std::cout << "Capture: running at " << m_capture.frame_rate()
 		          << " fps, " << m_capture.frame_count()
 		          << " frames grabbed (" << m_capture.arrived_count()
@@ -458,7 +442,7 @@ void Cli::cmd_status() const
 			std::cout << "Last frame: "
 			          << frame.width << "x" << frame.height << "\n";
 	}
-	// The cache is written from the detection thread, which has no polite
+	// The cache is written by whichever thread searched, which has no polite
 	// way to interrupt the console, so this is where trouble with it shows.
 	std::cout << "Positions: " << m_positions.state_text() << "\n";
 	std::cout << "Menu: "
@@ -468,19 +452,14 @@ void Cli::cmd_status() const
 	          << "\n";
 }
 
-void Cli::cmd_dump(const std::vector<std::string>& args) const
+void Cli::cmd_dump(const std::vector<std::string>& args)
 {
 	if (!m_capture.running()) {
 		std::cout << "Capture is not running; use 'start' first.\n";
 		return;
 	}
-	// The first frame lands a few milliseconds after 'start', so give the
-	// capture thread a moment rather than failing outright.
-	Frame frame = m_capture.latest_frame();
-	for (int wait = 0; frame.empty() && wait < FRAME_WAIT_STEPS; ++wait) {
-		std::this_thread::sleep_for(FRAME_WAIT_STEP);
-		frame = m_capture.latest_frame();
-	}
+	Frame frame;
+	m_capture.frame(frame);
 	if (frame.empty()) {
 		std::cout << "No frame captured yet - is the window minimised?\n";
 		return;
@@ -584,13 +563,18 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 		return;
 	}
 
-	// 'quick' may sit on either side of the count, so pick it out first and
+	// The scope may sit on either side of the count, so pick it out first and
 	// read whatever is left as the number of matches.
-	int  max_hits {1};
-	bool quick {false};
+	int         max_hits {1};
+	SearchScope scope {SearchScope::BOX_THEN_FULL};
 	for (size_t i = 1; i < args.size(); ++i) {
-		if ("quick" == to_lower(args[i])) {
-			quick = true;
+		const std::string option = to_lower(args[i]);
+		if ("quick" == option) {
+			scope = SearchScope::BOX;
+			continue;
+		}
+		if ("full" == option) {
+			scope = SearchScope::FULL;
 			continue;
 		}
 		try {
@@ -606,19 +590,17 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 		}
 	}
 
-	const std::string what    = m_detector.names_text(images);
+	const std::string what    = m_images.names_text(images);
 	const bool        several = images.size() > 1;
-	const auto        started = std::chrono::steady_clock::now();
+	const auto        started = eb::Clock::now();
 
 	Detection found;
 	std::string error;
-	if (!m_detector.detect(images, max_hits, quick, found, error)) {
+	if (!m_detector.detect(images, found, error, scope, max_hits)) {
 		std::cout << "   [ERROR] " << error << "\n";
 		return;
 	}
-	const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(
-		std::chrono::steady_clock::now() - started
-	);
+	const eb::Millis spent = eb::since(started);
 
 	// With one pattern it all fits on the summary line; with several, each
 	// was looked for in its own way and gets a line of its own below.
@@ -643,7 +625,7 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 		std::cout << what << " found " << found.hits.size()
 		          << (1 == found.hits.size() ? " time (" : " times (")
 		          << spent.count() << " ms" << where << mistaken << "):\n";
-		for (const DetectionHit& hit : found.hits) {
+		for (const ImageDetector::DetectionHit& hit : found.hits) {
 			std::cout << "  ";
 			if (several) std::cout << "'" << m_images(hit.image).name << "' ";
 			std::cout << "corner " << hit.at.x << "," << hit.at.y
@@ -980,7 +962,7 @@ void Cli::cmd_click(const std::vector<std::string>& args)
 			}
 			Detection found;
 			std::string error;
-			if (!m_detector.detect(image, 1, false, found, error)) {
+			if (!m_detector.detect({image}, found, error)) {
 				std::cout << "   [ERROR] " << error << "\n";
 				return;
 			}

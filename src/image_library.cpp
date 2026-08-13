@@ -460,6 +460,16 @@ std::string ImageLibrary::name_list() const
 	return list;
 }
 
+std::string ImageLibrary::names_text(const std::vector<size_t>& images) const
+{
+	std::string text;
+	for (size_t at = 0; at < images.size(); ++at) {
+		if (at > 0) text += (at + 1 == images.size()) ? " or " : ", ";
+		text += "'" + m_patterns[images[at]].name + "'";
+	}
+	return text;
+}
+
 cv::Point ImageLibrary::last_hit(size_t image) const
 {
 	std::lock_guard<std::mutex> lock {m_hits_mutex};

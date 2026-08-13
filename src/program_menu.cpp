@@ -26,16 +26,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
 
 namespace {
 
-constexpr const wchar_t* WINDOW_CLASS = L"EveBotsProgramMenu";
-constexpr const wchar_t* WINDOW_TITLE = L"EVE bots";
-constexpr int            HOTKEY_ID    = 1;
-
 constexpr size_t NOT_CHOSEN = static_cast<size_t>(-1);
-
-// How many entries get a number of their own. There are only ten digits,
-// and a menu that needs more than ten is one to scroll rather than one to
-// type at.
-constexpr size_t NUMBERED = 10;
 
 // The key that starts entry i: 1 for the first, 0 for the tenth, the way
 // the entries are labelled.
@@ -45,9 +36,6 @@ ImGuiKey number_key(size_t entry)
 		? ImGuiKey_0
 		: static_cast<ImGuiKey>(ImGuiKey_1 + static_cast<int>(entry));
 }
-
-// Dark enough to read as an overlay against a lit game window.
-constexpr float BACKGROUND[4] {0.07f, 0.08f, 0.10f, 1.0f};
 
 std::string last_error_text(const char* call)
 {

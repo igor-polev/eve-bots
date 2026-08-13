@@ -6,6 +6,7 @@
 */
 
 #pragma once
+
 #include <string>
 #include <vector>
 
@@ -26,7 +27,9 @@ public:
 	Cli(const Settings& settings, ImageLibrary& images,
 	    const ProgramParams& params, PositionCache& positions)
 		: m_settings {settings}, m_images {images}, m_params {params},
-		  m_positions {positions} {}
+		  m_positions {positions},
+		  m_capture {settings.capture_frame_rate()},
+		  m_detector {images, m_capture, positions, settings.min_margine()} {}
 
 	// Reads and dispatches commands until 'exit'. Returns process exit code.
 	int run();
@@ -38,8 +41,8 @@ private:
 	void cmd_find();
 	void cmd_start(const std::vector<std::string>& args);
 	void cmd_stop();
-	void cmd_dump(const std::vector<std::string>& args) const;
-	void cmd_status() const;
+	void cmd_dump(const std::vector<std::string>& args);
+	void cmd_status();
 	void cmd_images() const;
 	void cmd_detect(const std::vector<std::string>& args);
 	void cmd_click(const std::vector<std::string>& args);

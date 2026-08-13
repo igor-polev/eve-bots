@@ -66,15 +66,15 @@ size_t AutopilotProgram::next_waypoint()
 	const Budget reading {DESTINATION_TIMEOUT};
 	while (true) {
 		// The gate first, because it is the common case by far.
-		if (sighted("the route panel", GATE, reading.left())) return GATE;
+		if (sighted("the route panel", {GATE}, reading.left())) return GATE;
 
 		// Either station icon will do, so both go into one search rather
 		// than costing a pass each.
 		Sighting seen;
-		if (sighted("the route panel", STATIONS, reading.left(), seen))
+		if (sighted("the route panel", STATIONS, reading.left(), &seen))
 			return seen.image;
 
-		if (reading.left() <= std::chrono::milliseconds::zero())
+		if (reading.left() <= eb::Millis::zero())
 			fail("nothing in the OV panel to fly to");
 		pause(RECHECK_INTERVAL, "the route panel to say what is next");
 	}
@@ -103,7 +103,7 @@ bool AutopilotProgram::fly_hop()
 	// which says the ship really is on its way, and then end, which says
 	// it arrived.
 	const Budget warp {WARP_TIMEOUT};
-	appear("the warp message", WARP, warp);
+	appear("the warp message", {WARP}, warp.left());
 	vanish("the warp message", WARP, warp, RECHECK_INTERVAL);
 
 	// Arriving is not the same as being through: the gate still has to
@@ -114,6 +114,6 @@ bool AutopilotProgram::fly_hop()
 
 	// A station hop is the last one, and the undock button coming back is
 	// the proof the ship really is inside.
-	appear("the undock button", UNDOCK, DOCKING_TIMEOUT);
+	appear("the undock button", {UNDOCK}, DOCKING_TIMEOUT);
 	return true;
 }

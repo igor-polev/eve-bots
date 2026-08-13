@@ -33,7 +33,8 @@ int main()
 	cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_WARNING);
 
 	try {
-		// multi-threaded apartment: the capture thread uses WinRT too
+		// multi-threaded apartment: capture is WinRT, and it is pulled from
+		// whichever thread asks for a frame
 		winrt::init_apartment(winrt::apartment_type::multi_threaded);
 
 		Settings settings;
@@ -43,9 +44,8 @@ int main()
 			return -1;
 		}
 
-		// A bot that cannot see is useless, so a broken image library is
-		// as fatal as broken settings - better to say so at startup than
-		// to fail at the first detection.
+		// A bot that cannot see is useless, so a broken image library is as
+		// fatal as broken settings.
 		ImageLibrary images;
 		if (!images.load(
 				settings.image_dir(), settings.detect_threshold(), error))
@@ -70,11 +70,9 @@ int main()
 			             "defaults.\n";
 		}
 
-		// Where patterns were last seen. Kept beside the settings file, so
-		// it lands wherever the bot was installed rather than in whatever
-		// directory it happened to be launched from. Unlike the other three
-		// files this one is written by us and regenerates itself in a
-		// detection apiece, so a broken one is worth a word but not a
+		// Where patterns were last seen, kept beside the settings file so it
+		// lands wherever the bot was installed. This one is written by us
+		// and regenerates itself, so a broken one is worth a word but not a
 		// refusal to start.
 		PositionCache positions;
 		if (!positions.load(

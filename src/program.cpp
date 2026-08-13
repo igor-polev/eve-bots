@@ -7,6 +7,8 @@
 
 #include <algorithm>
 
+#include <winrt/base.h>
+
 #include "program.hpp"
 
 namespace {
@@ -22,25 +24,19 @@ enum class Look {
 // Whether whoever asked for something wants it given up on.
 using StopCheck = std::function<bool()>;
 
-// What a click has to produce before it counts, and how hard to insist.
-//
-// A click that lands is not a click that worked. The interface may be
-// busy, the button may still be drawing itself, the game may drop a
-// press that falls between two rendered frames - and none of that looks
-// any different from success at the moment the button goes down. The
-// only way to know is to look for whatever the click was supposed to
-// bring about, so that is what this names.
+// What a click has to produce before it counts, and how hard to insist. A
+// click that lands is not a click that worked: the interface may be busy or
+// the button still drawing itself, and none of that looks any different at
+// the moment the button goes down. The only way to know is to look for what
+// the click was supposed to bring about.
 struct ClickConfirm {
-	// Any one of these appearing is proof enough: they are alternatives,
-	// the way a search for several patterns always is. Empty asks for no
+	// Any one of these appearing is proof enough. Empty asks for no
 	// confirmation, which leaves a plain click.
-	std::vector<size_t>       images;
-	// How long to keep looking after each click. Each attempt gets this
-	// in full, so the whole thing can take (retries + 1) times as long.
-	std::chrono::milliseconds timeout {0};
-	// Further clicks to make when one goes unconfirmed. 0 means click
-	// once and report whether it showed.
-	int                       retries {0};
+	std::vector<size_t> images;
+	// How long to keep looking after each click, in full for every attempt.
+	eb::Millis          timeout {0};
+	// Further clicks to make when one goes unconfirmed.
+	int                 retries {0};
 
 	bool wanted() const noexcept { return !images.empty(); }
 };
@@ -62,12 +58,12 @@ struct ClickReport {
 };
 
 // A program sleeping between attempts checks for a stop this often.
-constexpr std::chrono::milliseconds WAIT_STEP {50};
+constexpr eb::Millis WAIT_STEP {50};
 
 // Pause between two attempts at the same pattern. A full frame search
 // already costs seconds, so this only matters once a quick box search is
 // possible - and then it keeps a program from spinning on the CPU.
-constexpr std::chrono::milliseconds RETRY_PAUSE {250};
+constexpr eb::Millis RETRY_PAUSE {250};
 
 // Nothing anybody would write in prog_params.json, so asking for a value
 // with this as the fallback answers "was there a number there at all?"
@@ -79,14 +75,14 @@ bool asked_to_stop(const StopCheck& stopping)
 	return stopping && stopping();
 }
 
-// The three below are what Program's own waiting and looking are made
-// of, written without the program so that confirmed_click() - which
-// anybody may call, program or console - can be made of them too.
+// The three below are what Program's own waiting and looking are made of,
+// written without the program so that confirmed_click() - which anybody may
+// call, program or console - can be made of them too.
 
-bool rest(std::chrono::milliseconds duration, const StopCheck& stopping)
+bool rest(eb::Millis duration, const StopCheck& stopping)
 {
-	for (std::chrono::milliseconds left = duration;
-	     left > std::chrono::milliseconds::zero();
+	for (eb::Millis left = duration;
+	     left > eb::Millis::zero();
 	     left -= WAIT_STEP)
 	{
 		if (asked_to_stop(stopping)) return false;
@@ -95,27 +91,23 @@ bool rest(std::chrono::milliseconds duration, const StopCheck& stopping)
 	return !asked_to_stop(stopping);
 }
 
+// The budget is what is left to keep trying for, not a limit on the search
+// itself: a search runs to its answer, and a slow one that finds the pattern
+// is not a failure. So it is spent between attempts rather than during one.
 Look one_look(
 	ProgramContext&            context,
 	const std::vector<size_t>& images,
-	std::chrono::milliseconds  budget,
+	eb::Millis                 budget,
 	const StopCheck&           stopping,
 	cv::Point&                 corner,
 	size_t&                    found,
 	std::string&               trouble)
 {
 	if (asked_to_stop(stopping)) return Look::STOPPED;
-	if (budget <= std::chrono::milliseconds::zero()) return Look::MISSING;
+	if (budget <= eb::Millis::zero()) return Look::MISSING;
 
-	// The search gets what is left of the budget and no more, so one slow
-	// full frame pass cannot overrun the whole timeout.
-	const ProgramClock::time_point began = ProgramClock::now();
-	Detection seen;
-	if (!context.detector.detect(images, 1, false, seen, trouble, budget)) {
-		// Running out of the time it was given is not a fault, it is the
-		// answer: the pattern was not there within the budget.
-		return since(began) >= budget ? Look::MISSING : Look::TROUBLE;
-	}
+	ImageDetector::Detection seen;
+	if (!context.detector.detect(images, seen, trouble)) return Look::TROUBLE;
 	if (seen.hits.empty()) return Look::MISSING;
 
 	corner = seen.hits.front().at;
@@ -126,18 +118,18 @@ Look one_look(
 Look keep_looking(
 	ProgramContext&            context,
 	const std::vector<size_t>& images,
-	std::chrono::milliseconds  budget,
+	eb::Millis                 budget,
 	const StopCheck&           stopping,
 	cv::Point&                 corner,
 	size_t&                    found,
 	std::string&               trouble)
 {
-	const ProgramClock::time_point deadline = ProgramClock::now() + budget;
+	const eb::TimePoint deadline = eb::Clock::now() + budget;
 	while (true) {
-		const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
-			deadline - ProgramClock::now()
+		const auto left = std::chrono::duration_cast<eb::Millis>(
+			deadline - eb::Clock::now()
 		);
-		if (left <= std::chrono::milliseconds::zero()) return Look::MISSING;
+		if (left <= eb::Millis::zero()) return Look::MISSING;
 
 		const Look seen =
 			one_look(context, images, left, stopping, corner, found, trouble);
@@ -148,13 +140,10 @@ Look keep_looking(
 	}
 }
 
-// Clicks a point of the captured window and, when a confirmation was
-// asked for, waits for proof that the game took it - clicking again up
-// to retries times when none arrives.
-//
-// error is filled for TROUBLE and for UNCONFIRMED, since both are things
-// the caller will want to say out loud; the other outcomes leave it
-// alone. stopping may be empty, and is then never asked.
+// Clicks a point of the captured window and, when a confirmation was asked
+// for, waits for proof that the game took it - clicking again up to retries
+// times when none arrives. error is filled for TROUBLE and UNCONFIRMED
+// alone; stopping may be empty, and is then never asked.
 Click confirmed_click(
 	ProgramContext&     context,
 	const cv::Point&    target,
@@ -202,19 +191,11 @@ Click confirmed_click(
 		}
 	}
 
-	error = context.detector.names_text(confirm.images)
-	      + " did not follow";
+	error = context.images.names_text(confirm.images) + " did not follow";
 	return Click::UNCONFIRMED;
 }
 
 } // namespace
-
-std::chrono::milliseconds since(ProgramClock::time_point start)
-{
-	return std::chrono::duration_cast<std::chrono::milliseconds>(
-		ProgramClock::now() - start
-	);
-}
 
 std::string program_exit_text(ProgramExit exit)
 {
@@ -275,7 +256,7 @@ bool Program::Millis::read(
 		      + std::to_string(least());
 		return false;
 	}
-	m_value = std::chrono::milliseconds {static_cast<long long>(value)};
+	m_value = eb::Millis {static_cast<long long>(value)};
 	return true;
 }
 
@@ -331,12 +312,9 @@ std::string Program::Count::text() const
 bool Program::configure(const ProgramParams& params, std::string& error)
 {
 	for (ParamDecl* param : m_params) {
-		// The name has to say what the number is, because that is all a
-		// call site shows of it: GATE_JUMP_PAUSE is time the program will
-		// really spend, DOCKING_TIMEOUT is time it hopes not to. A
-		// parameter whose name disagrees with its kind would quietly make
-		// that unreadable, so it is refused here rather than left to be
-		// noticed later.
+		// The name has to say what the number is, because that is all a call
+		// site shows of it: GATE_JUMP_PAUSE is time the program will really
+		// spend, DOCKING_TIMEOUT is time it hopes not to.
 		const std::string key    = param->key();
 		// A Flag says what it turns on rather than what it costs, so it is
 		// the one kind with no ending to check.
@@ -464,10 +442,10 @@ Program::Doing::~Doing()
 	if (!m_program.m_notes.empty()) m_program.m_notes.pop_back();
 }
 
-std::chrono::milliseconds Program::Budget::left() const
+eb::Millis Program::Budget::left() const
 {
-	const std::chrono::milliseconds spent = since(m_began);
-	return spent >= m_total ? std::chrono::milliseconds::zero() : m_total - spent;
+	const eb::Millis spent = eb::since(m_began);
+	return spent >= m_total ? eb::Millis::zero() : m_total - spent;
 }
 
 std::string Program::note_text() const
@@ -494,8 +472,7 @@ ProgramResult Program::done(std::string description)
 	return ProgramResult {ProgramExit::SUCCESS, std::move(description)};
 }
 
-void Program::rest_or_stop(
-	std::chrono::milliseconds duration, const std::string& what) const
+void Program::rest_or_stop(eb::Millis duration, const std::string& what) const
 {
 	if (!rest(duration, [this] { return stopping(); }))
 		stopped_while("waiting for " + what);
@@ -511,10 +488,10 @@ void Program::pause(const Interval& duration, const std::string& what) const
 	rest_or_stop(duration.value(), what);
 }
 
-Program::Sighting Program::watch_for(
+Program::Sighting Program::appear(
 	const std::string&         what,
 	const std::vector<size_t>& images,
-	std::chrono::milliseconds  budget) const
+	eb::Millis                 budget) const
 {
 	Sighting    seen;
 	std::string trouble;
@@ -528,28 +505,6 @@ Program::Sighting Program::watch_for(
 	fail(what + " did not appear");
 }
 
-cv::Point Program::appear(
-	const std::string&        what,
-	size_t                    image,
-	std::chrono::milliseconds budget) const
-{
-	return watch_for(what, std::vector<size_t> {image}, budget).at;
-}
-
-cv::Point Program::appear(
-	const std::string& what, size_t image, const Budget& budget) const
-{
-	return watch_for(what, std::vector<size_t> {image}, budget.left()).at;
-}
-
-Program::Sighting Program::appear(
-	const std::string&         what,
-	const std::vector<size_t>& images,
-	std::chrono::milliseconds  budget) const
-{
-	return watch_for(what, images, budget);
-}
-
 void Program::vanish(
 	const std::string& what,
 	size_t             image,
@@ -559,45 +514,25 @@ void Program::vanish(
 	while (true) {
 		rest_or_stop(recheck.value(), what + " to go");
 
-		const std::chrono::milliseconds left = budget.left();
-		if (left <= std::chrono::milliseconds::zero())
+		const eb::Millis left = budget.left();
+		if (left <= eb::Millis::zero())
 			fail(what + " never went away");
-		cv::Point at;
-		if (!sighted(what, image, left, at)) return;
+		if (!sighted(what, {image}, left)) return;
 	}
-}
-
-bool Program::sighted(
-	const std::string&        what,
-	size_t                    image,
-	std::chrono::milliseconds budget) const
-{
-	cv::Point anywhere;
-	return sighted(what, image, budget, anywhere);
-}
-
-bool Program::sighted(
-	const std::string&        what,
-	size_t                    image,
-	std::chrono::milliseconds budget,
-	cv::Point&                at) const
-{
-	Sighting seen;
-	if (!sighted(what, std::vector<size_t> {image}, budget, seen)) return false;
-	at = seen.at;
-	return true;
 }
 
 bool Program::sighted(
 	const std::string&         what,
 	const std::vector<size_t>& images,
-	std::chrono::milliseconds  budget,
-	Sighting&                  seen) const
+	eb::Millis                 budget,
+	Sighting*                  seen) const
 {
+	Sighting    anywhere;
+	Sighting&   into = seen ? *seen : anywhere;
 	std::string trouble;
 	const Look  looked = one_look(
 		context(), images, budget, [this] { return stopping(); },
-		seen.at, seen.image, trouble
+		into.at, into.image, trouble
 	);
 	if (Look::FOUND == looked)   return true;
 	if (Look::MISSING == looked) return false;
@@ -610,12 +545,11 @@ void Program::click(
 	size_t                     image,
 	const std::vector<size_t>& confirm) const
 {
-	// Where it is now, which is not always where whoever asked for the
-	// click last saw it. Failing to find it here is the same failure as
-	// failing to find it anywhere else, so watch_for() reports it.
-	const cv::Point corner = watch_for(
-		what, std::vector<size_t> {image}, common().ACTION_TIMEOUT
-	).at;
+	// Where it is now, which is not always where whoever asked for the click
+	// last saw it. Failing to find it here is the same failure as failing to
+	// find it anywhere else, so appear() reports it.
+	const cv::Point corner =
+		appear(what, {image}, common().ACTION_TIMEOUT).at;
 
 	const ImagePattern& pattern = context().images(image);
 	const cv::Point target =
@@ -645,11 +579,6 @@ void Program::click(
 	if (Click::STOPPED == clicked)     stopped_while("clicking " + what);
 	if (Click::UNCONFIRMED == clicked) fail(what + " did not take: " + trouble);
 	fail("cannot click " + what + ": " + trouble);
-}
-
-void Program::click(const std::string& what, size_t image) const
-{
-	click(what, image, std::vector<size_t> {});
 }
 
 ProgramRunner::~ProgramRunner()
@@ -721,6 +650,9 @@ bool ProgramRunner::start(
 	m_running.store(true);
 	try {
 		m_thread = std::thread {[this, &job, context] {
+			// A search pulls a frame, and capture is WinRT, so this thread
+			// needs an apartment of its own.
+			winrt::init_apartment(winrt::apartment_type::multi_threaded);
 			// context holds three references and is copied into the thread,
 			// so it stays valid as long as the objects behind it do.
 			ProgramContext local = context;
@@ -728,6 +660,7 @@ bool ProgramRunner::start(
 			set_current(std::string {});
 			m_running.store(false);
 			if (m_on_finish) m_on_finish(job.name(), result);
+			winrt::uninit_apartment();
 		}};
 	}
 	catch (const std::exception& e) {

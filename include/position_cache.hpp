@@ -6,23 +6,20 @@
 
 	Finding a pattern the first time means scanning the whole frame, which
 	costs seconds; every search afterwards looks at a small box around the
-	position remembered from the last one. That memory used to die with the
-	process, so the first search of every session paid the full price again.
-	This file carries it over.
+	remembered position. This file carries that memory over between runs.
 
 	A remembered position only means anything for the client it was taken
-	from: another character has different panels open, and a differently
-	sized window puts everything somewhere else. So each set of positions is
-	filed under the character name and the frame size, and a set is used
-	only when both match. Sets for other clients are left in the file
-	untouched, so switching back and forth costs nothing.
+	from, so each set is filed under the character name and the frame size
+	and used only when both match. Sets for other clients are left in the
+	file untouched, so switching back and forth costs nothing.
 
-	Only the axes a pattern actually holds still along are written - those
-	are the only ones a quick search reads, and the free one would change
-	with almost every detection and rewrite the file for nothing.
+	Only the axes a pattern actually holds still along are written: the free
+	one would change with almost every detection and rewrite the file for
+	nothing.
 */
 
 #pragma once
+
 #include <map>
 #include <mutex>
 #include <string>
@@ -37,10 +34,9 @@ public:
 	static constexpr const wchar_t* FILE_NAME = L"eve_positions.json";
 
 	// Reads path, which need not exist: an absent cache is the normal state
-	// of a first run. Returns false and fills error when the file is there
-	// but unreadable - the cache is then empty and will be written afresh,
-	// because positions are re-learnt by one detection each and refusing to
-	// start over a file that regenerates itself would be absurd.
+	// of a first run. False and error when the file is there but unreadable;
+	// the cache is then empty and written afresh, since it regenerates
+	// itself in one detection per pattern.
 	bool load(const std::wstring& path, std::string& error);
 
 	const std::wstring& source_path() const noexcept { return m_path; }
@@ -50,13 +46,11 @@ public:
 		int  restored {0};      // positions handed back to the library
 	};
 
-	// Points the cache at one client. Positions recorded from now on are
-	// filed under this character and frame size, and whatever was filed
-	// under the same pair before is handed to the library. Positions the
-	// library holds from another client are forgotten first - they would
-	// send every quick search to the wrong part of the frame.
-	// Following the same client twice over changes nothing and restores
-	// nothing: what the library already holds is fresher than the file.
+	// Points the cache at one client: positions are filed under this
+	// character and frame size from now on, and whatever was filed under the
+	// same pair before is handed to the library. What the library holds from
+	// another client is forgotten first. Following the same client twice
+	// changes nothing - what the library holds is fresher than the file.
 	Follow follow(
 		ImageLibrary&      images,
 		const std::string& character,
@@ -64,17 +58,15 @@ public:
 		int                height
 	);
 
-	// Records where a pattern was just found. Writes the file only when
-	// that changes something worth keeping - a pattern with no
-	// FIXED_DIRECTIONS is not kept at all, and one that only moved along an
-	// axis it does not hold still along costs nothing. True when the file
-	// was written. Called from the detection thread.
+	// Records where a pattern was just found, writing the file only when
+	// that changes something worth keeping: a pattern with no
+	// FIXED_DIRECTIONS is not kept, and one that moved along a free axis
+	// costs nothing. True when the file was written.
 	bool store(const ImagePattern& pattern, const cv::Point& corner);
 
-	// What went wrong the last time the file was written, empty when
-	// nothing did. Writing happens on the detection thread, where there is
-	// no sensible way to interrupt the console, so the trouble is kept here
-	// for 'status' to show.
+	// What went wrong the last time the file was written, empty when nothing
+	// did. Writing happens on whichever thread searched, which cannot
+	// politely interrupt the console, so it is kept here for 'status'.
 	std::string last_error() const;
 
 	// One line for 'status': which client is being followed and how much is

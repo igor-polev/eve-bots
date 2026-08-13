@@ -4,48 +4,28 @@
 
 	AutopilotProgram - fly the set route until the ship docks.
 
-	The route panel shows one icon for the next waypoint: a gate when the
-	next hop is a jump, a station when it is the destination. Which of the
-	two is on screen decides the whole of the rest of the pass - which
-	command button to press afterwards, how long to wait once warp ends,
-	and whether arriving means the route is finished.
-
-	A hop begins by asking the panel which it is: the gate first, because
-	it is the common case by far, and only then the station. A station is
-	drawn with one of two icons depending on whether it is the home
-	station, and the difference means nothing to flying a route, so those
-	two go into one search rather than costing a pass each.
-
-	One pass through the loop is one hop:
+	The route panel shows one icon for the next waypoint - a gate for a
+	jump, a station for the destination - and which of the two it is decides
+	the whole of the rest of the pass. One pass through the loop is one hop:
 
 	    route icon -> click -> jump or dock button -> click
 	    -> warp starts -> warp ends -> settle -> next hop
 
-	Both clicks are confirmed ones, and each is confirmed by whatever it
-	was supposed to produce: clicking the route icon has to bring up the
-	command button for that kind of hop, and pressing that button has to
-	put the warp vector message on screen. Neither needs a search of its
-	own afterwards - the confirmation already found the thing and says
-	where it is, which is exactly what the next step needs. A click that
-	does not show is repeated rather than reported, since a press lost
-	between two rendered frames is the ordinary way for one to fail.
+	Both clicks are confirmed by whatever they were supposed to produce, so
+	neither needs a search of its own afterwards.
 
-	Warp is then watched from both sides, and the two share one
-	WARP_TIMEOUT budget. First the warp message has to appear, which says
-	the ship really is on its way; then it has to go away, which says it
-	arrived. Watching only for its arrival would read a warp that never
-	started as success. One budget rather than two because the pair of
-	them is a single wait - a warp that starts late leaves less time to
-	finish, and what matters is how long the hop has taken in all.
+	Warp is watched from both sides on one WARP_TIMEOUT budget: the message
+	has to appear, which says the ship is on its way, and then go away,
+	which says it arrived. Watching only for its arrival would read a warp
+	that never started as success, and one budget rather than two because a
+	warp that starts late leaves less time to finish.
 
 	The loop ends when a station hop finishes and the undock button comes
-	back, because that button is the proof the ship is docked. A route
-	that ends anywhere else - a gate, an empty route panel - runs out of
-	DESTINATION_TIMEOUT and reports failure, since this program has no
-	other way to tell "arrived" from "the interface is late".
+	back, that being the proof the ship is docked.
 */
 
 #pragma once
+
 #include "prg/prg_undock.hpp"
 #include "program.hpp"
 
@@ -90,12 +70,8 @@ private:
 
 	UndockProgram m_undock;
 
-	// What can be tuned in prog_params.json, and what it is without it.
-	// The two pauses are the whole of what a hop spends on purpose, so
-	// they are where a route gets faster; the timeouts only cost anything
-	// when something has gone wrong. How long a click waits for its
-	// confirmation and how many times it is repeated are not here at all:
-	// those are the same everywhere and come from eve_config.json.
+	// What can be tuned in prog_params.json. The two pauses are the whole of
+	// what a hop spends on purpose, so they are where a route gets faster.
 	PROG_PARAM(Timeout,  DESTINATION_TIMEOUT, 10000);
 	PROG_PARAM(Timeout,  WARP_TIMEOUT,       300000);
 	// The gap between two looks at the same thing: the route panel while

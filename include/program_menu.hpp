@@ -4,30 +4,24 @@
 
 	ProgramMenu - the pop-up a hotkey brings up over the game.
 
-	The console is the whole interface, but a hand on the mouse in the
-	middle of something is nowhere near it. This is the short way in: one
-	key combination, the list of programs over the centre of the client,
-	one click to start, and it is gone again. The entries are numbered and
-	the number starts them, so the whole thing can be done from the
-	keyboard without the hand ever reaching the console. While a program
-	is running the same combination brings up its name and an Abort button
-	instead, since starting a second one is not something the runner
-	allows.
+	The short way in when the hand is on the mouse rather than at the
+	console: one key combination, the list of programs over the client, one
+	click or one number to start. While a program is running the same
+	combination offers its name and an Abort button instead.
 
-	It lives on its own thread. A window belongs to the thread that
-	created it and only that thread may pump its messages, and the
-	console thread spends its life blocked in getline - so everything
-	here is built, drawn and torn down between start() and stop(), and
-	the hooks it was handed are all called from that thread.
+	It lives on its own thread, because a window may only be pumped by the
+	thread that created it and the console thread spends its life blocked in
+	getline. Everything here is built, drawn and torn down between start()
+	and stop(), and every hook is called from that thread.
 
 	Drawing is Dear ImGui on a small Direct3D 11 swapchain of its own,
-	deliberately not the one screen capture uses: sharing a device would
-	put the capture path behind the menu's lock for as long as a frame
-	takes to draw. Nothing is drawn while the menu is down - the thread
-	sleeps in WaitMessage until the hotkey arrives.
+	deliberately not the one screen capture uses: sharing a device would put
+	the capture path behind the menu's lock for as long as a frame takes to
+	draw.
 */
 
 #pragma once
+
 #include <atomic>
 #include <functional>
 #include <future>
@@ -61,8 +55,8 @@ struct MenuHooks {
 
 class ProgramMenu {
 public:
-	// The pop-up's shape at 96 dpi; everything is scaled up from here.
-	// The height is not among them: it is measured from what was drawn.
+	// The pop-up's shape at 96 dpi; everything is scaled up from here. The
+	// height is measured from what was drawn instead.
 	static constexpr int WIDTH      = 200;
 	static constexpr int ROW_HEIGHT = 28;
 
@@ -84,6 +78,17 @@ public:
 	const Hotkey& hotkey() const noexcept { return m_hotkey; }
 
 private:
+	static constexpr const wchar_t* WINDOW_CLASS = L"EveBotsProgramMenu";
+	static constexpr const wchar_t* WINDOW_TITLE = L"EVE bots";
+	static constexpr int            HOTKEY_ID    = 1;
+
+	// How many entries get a number of their own. There are only ten digits,
+	// and a menu that needs more is one to scroll rather than to type at.
+	static constexpr size_t NUMBERED = 10;
+
+	// Dark enough to read as an overlay against a lit game window.
+	static constexpr float BACKGROUND[4] {0.07f, 0.08f, 0.10f, 1.0f};
+
 	static LRESULT CALLBACK window_proc(HWND, UINT, WPARAM, LPARAM);
 	LRESULT handle(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
 
