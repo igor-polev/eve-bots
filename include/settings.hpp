@@ -25,12 +25,13 @@ public:
 
 	// Highest capture rate the config file may ask for.
 	static constexpr unsigned MAX_FRAME_RATE = 240;
-	// Widest MIN_MARGINE worth allowing; past this a "small" window is
-	// most of the frame and the searches it guards stop being cheap.
-	static constexpr int MAX_MIN_MARGINE = 256;
 	// A click repeated this many times has stopped being a retry and
 	// started being a program hammering the interface.
 	static constexpr int MAX_ACTION_RETRIES = 20;
+	// Every confirmed click a program makes pays this, so five seconds of
+	// it is already a route that crawls. Anything longer was meant to be a
+	// timeout somewhere else.
+	static constexpr int64_t MAX_WAIT_CLICK = 5000;
 	// Past a minute of required quiet the bot would spend more of its time
 	// waiting for a gap than working, and anybody at the keyboard would
 	// simply stop it.
@@ -56,10 +57,6 @@ public:
 	const std::wstring& image_dir() const noexcept { return m_image_dir; }
 	// Match certainty a hit must reach when a pattern names no threshold.
 	double detect_threshold() const noexcept { return m_detect_threshold; }
-	// Smallest slack, in pixels, any search window is given: the floor
-	// under a FIXED_DIRECTIONS margin, and the room a candidate is allowed
-	// when it is weighed against the patterns it could be confused with.
-	int min_margine() const noexcept { return m_min_margine; }
 	// Invalid when the file asked for no menu.
 	const Hotkey& menu_hotkey() const noexcept { return m_menu_hotkey; }
 	// Whether to capture a client as the application starts, without
@@ -82,6 +79,5 @@ private:
 	unsigned        m_capture_frame_rate {0};
 	std::wstring    m_image_dir;
 	double          m_detect_threshold {0.0};
-	int             m_min_margine {0};
 	bool            m_autostart_capture {false};
 };

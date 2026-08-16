@@ -21,6 +21,8 @@
 
 #include <opencv2/core.hpp>
 
+#include "common_defs.hpp"
+
 // Axes along which a pattern normally keeps its place. Most of the EVE user
 // interface is pinned to a panel, so once an element has been found it turns
 // up at the same coordinates again - which lets the detector look at a small
@@ -66,7 +68,7 @@ struct ImagePattern {
 	// hue, so a match is only kept once it has been weighed against these
 	// and none of them fits the same pixels better. Symmetric: naming it
 	// on either pattern is enough.
-	std::vector<size_t> similar;
+	eb::Images similar;
 
 	cv::Mat image;  // CV_32FC3, BGR, values 0..1
 	cv::Mat mask;   // CV_32FC3 weights; empty when the PNG is fully opaque
@@ -163,7 +165,7 @@ public:
 
 	// "'jump'", "'jump' or 'dock'", "'a', 'b' or 'c'" - for messages about
 	// something that covered more than one pattern.
-	std::string names_text(const std::vector<size_t>& images) const;
+	std::string names_text(const eb::Images& images) const;
 
 	// Where a pattern was seen last, or NEVER_SEEN. Kept here rather than in
 	// the detector so that it outlasts any single search, and never cleared:

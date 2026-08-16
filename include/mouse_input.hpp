@@ -25,18 +25,18 @@
 
 #pragma once
 
-#include <functional>
 #include <string>
 
 #include <windows.h>
 
 #include <opencv2/core.hpp>
 
+#include "common_defs.hpp"
 #include "input_priority.hpp"
 
 // How long to leave the interface alone after a click. The game needs a
 // moment to react before the next captured frame is worth looking at.
-constexpr int UI_WAIT_DEFAULT = 20;
+constexpr eb::Millis UI_WAIT_DEFAULT {20};
 
 struct ClickResult {
 	cv::Point frame;    // the point asked for, in capture frame pixels
@@ -46,21 +46,17 @@ struct ClickResult {
 	bool yielded   {false};   // the desktop was in use and was waited for
 };
 
-// Asked between waits, so that a program told to stop is not held here for
-// as long as the user keeps typing. May be empty, and is then never asked.
-using InputStop = std::function<bool()>;
-
 // Clicks one point of window, given in capture frame coordinates, then
-// sleeps wait_ms so the game can react before the next frame is examined.
+// sleeps wait so the game can react before the next frame is examined.
 // Returns false and fills error when the point cannot be mapped onto the
-// desktop, the input is refused, a stop was asked for, or the desktop was
-// never free enough within the priority's timeout.
+// desktop, the input is refused, or the desktop was never free enough within
+// the priority's timeout. A click runs to its end once begun: it takes a
+// quarter of a second and cannot be left half made.
 bool click_at(
 	HWND                 window,
 	const cv::Point&     frame,
-	int                  wait_ms,
+	eb::Millis           wait,
 	const InputPriority& priority,
-	const InputStop&     stopping,
 	ClickResult&         result,
 	std::string&         error
 );

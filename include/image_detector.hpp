@@ -8,11 +8,16 @@
 	is shared and the work is CPU bound, so two at once would only slow each
 	other down.
 
-	Every answered request is kept for as long as capture keeps handing back
-	the frame it was answered from. The same question about the same pixels
-	cannot come to a different answer, so it is looked up rather than asked
-	again - which is what lets a program find a button and then click it as
-	two searches instead of carrying the position between them.
+	What was searched for is kept, one pattern at a time, for as long as
+	capture keeps handing back the frame it was searched in. The same
+	question about the same pixels cannot come to a different answer, so it
+	is looked up rather than asked again - which is what lets a program find
+	a button and then click it as two searches instead of carrying the
+	position between them.
+
+	Per pattern rather than per request, because a request naming several is
+	several searches of one pattern each: asking for a gate and then for a
+	gate or a station reuses what was learnt about the gate.
 */
 
 #pragma once
@@ -75,18 +80,13 @@ public:
 	ImageDetector(
 		ImageLibrary&  library,
 		ScreenCapture& capture,
-		PositionCache& cache,
-		int            min_margine // TODO: make min_margine a class private const, not param
+		PositionCache& cache
 	);
 	ImageDetector(const ImageDetector&)            = delete;
 	ImageDetector& operator=(const ImageDetector&) = delete;
 
-	// Smallest slack any search window gets, from MIN_MARGINE in the
-	// settings.
-	int min_margine() const noexcept { return m_min_margine; }
-
 	// Slack in pixels along each axis for one pattern: its own fraction
-	// where it named one, min_margine() where it did not.
+	// where it named one, MIN_MARGINE where it did not.
 	cv::Point search_margines(const ImagePattern& pattern) const;
 
 	/*
@@ -103,14 +103,20 @@ public:
 		has moved cannot cost the others their quick pass.
 	*/
 	bool detect(
-		const std::vector<size_t>& images,
-		Detection&                 result,
-		std::string&               error,
-		SearchScope                scope    = SearchScope::BOX_THEN_FULL,
-		int                        max_hits = 1
+		const eb::Images& images,
+		Detection&        result,
+		std::string&      error,
+		SearchScope       scope    = SearchScope::BOX_THEN_FULL,
+		int               max_hits = 1
 	);
 
 private:
+	// Smallest slack any search window gets: the floor under a pattern's own
+	// margin, and the room a candidate is allowed when it is weighed against
+	// the patterns it could be confused with. A couple of pixels of slack
+	// around a small icon is no slack at all.
+	static constexpr int MIN_MARGINE = 4;
+
 	// Slack a quick search leaves around the remembered position when
 	// eve_images.json asks for none, as a fraction of the pattern's longer
 	// side.
@@ -129,23 +135,38 @@ private:
 	// a pixel.
 	static constexpr int SUPPRESSION_DIVISOR = 3;
 
-	// A request that has already been answered, and what it came to. The
-	// whole request is the key: how many hits were wanted and where they
-	// were looked for both change the answer.
-
-	// TODO: Remembered must contain separate images, not list. Even if list was requested, there were several searches for one pattern each and these must be remembered. When a new list search is requested, it should not be checked for the whole list, but for each image separately -- if any is remembered, that will do.
+	// One pattern's share of a search already made, kept per pattern rather
+	// than per request: a search for several is several searches of one
+	// pattern each, and any of them may answer a later request that names
+	// that pattern among others.
 	struct Remembered {
-		std::vector<size_t> images;
-		int                 max_hits {0};
-		SearchScope         scope {SearchScope::NONE};
-		Detection           answer;
+		size_t        image {0};
+		int           max_hits {0};
+		// The question this answers, which is not always the one that was
+		// asked: a pattern whose box missed under a box-then-full request
+		// while another pattern answered never had its full pass, so what
+		// it settles is the box alone.
+		SearchScope   scope {SearchScope::NONE};
+		PatternSearch searched;  // and what was actually done for it
+		std::vector<DetectionHit> hits;
 
-		bool answers(
-			const std::vector<size_t>& wanted, int hits, SearchScope where) const
+		bool answers(size_t wanted, int count, SearchScope asked) const
 		{
-			return max_hits == hits && scope == where && images == wanted;
+			if (image != wanted || max_hits != count) return false;
+			if (scope == asked) return true;
+			// A miss only ever answers its own question. A hit found in the
+			// box answers either question that looks there, since the box
+			// is where a box-then-full search looks first.
+			if (hits.empty() || SearchScope::BOX != searched.scope)
+				return false;
+			return SearchScope::BOX == asked
+			    || SearchScope::BOX_THEN_FULL == asked;
 		}
 	};
+
+	// Best first, whichever pattern a hit came from, and no more of them
+	// than were asked for.
+	static void rank_hits(std::vector<DetectionHit>& hits, int max_hits);
 
 	// Searches one rectangle of a BGRA frame for one pattern. Hits come back
 	// in frame coordinates, best match first, replacing whatever was in the
@@ -182,11 +203,15 @@ private:
 	ImageLibrary&  m_library;
 	ScreenCapture& m_capture;
 	PositionCache& m_cache;
-	int            m_min_margine;
 
 	std::mutex m_mutex;  // serialises callers, and guards everything below
 
-	Frame                   m_frame;
-	std::vector<Remembered> m_memo;  // everything asked about m_frame
-	// TODO: question: why std::vector is used for FIFO buffer m_memo, not a std::deque?
+	Frame m_frame;
+	// Everything already searched for in m_frame. Only ever appended to and
+	// read through, and thrown away whole when the frame changes, so a
+	// vector is the container for it: contiguous to scan, one allocation to
+	// grow, and clear() keeps the buffer for the next frame to fill.
+	std::vector<Remembered> m_memo;
 };
+
+using Scope = ImageDetector::SearchScope;

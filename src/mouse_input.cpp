@@ -71,25 +71,18 @@ eb::Millis user_quiet_for()
 	return eb::Millis {std::max<LONG>(0, quiet)};
 }
 
-// Waits for a gap in what the user is doing. False means a stop was asked
-// for; running out of time is not a failure but the end of the waiting -
-// stalling a program indefinitely is worse than one interrupted keystroke,
-// so the caller goes ahead.
-bool wait_for_quiet(
-	eb::Millis       needed,
-	eb::TimePoint    deadline,
-	const InputStop& stopping,
-	bool&            yielded)
+// Waits for a gap in what the user is doing. Running out of time ends the
+// waiting rather than the click: stalling a program indefinitely is worse
+// than one interrupted keystroke, so the caller goes ahead.
+void wait_for_quiet(eb::Millis needed, eb::TimePoint deadline, bool& yielded)
 {
-	if (needed <= eb::Millis::zero()) return true;
+	if (needed <= eb::Millis::zero()) return;
 
 	while (user_quiet_for() < needed) {
-		if (stopping && stopping()) return false;
-		if (eb::Clock::now() >= deadline) return true;
+		if (eb::Clock::now() >= deadline) return;
 		yielded = true;
 		std::this_thread::sleep_for(YIELD_POLL);
 	}
-	return true;
 }
 
 std::string last_error_text(const char* call)
@@ -322,9 +315,8 @@ bool try_click(
 bool click_at(
 	HWND                 window,
 	const cv::Point&     frame,
-	int                  wait_ms,
+	eb::Millis           wait,
 	const InputPriority& priority,
-	const InputStop&     stopping,
 	ClickResult&         result,
 	std::string&         error)
 {
@@ -354,17 +346,7 @@ bool click_at(
 		eb::Clock::now() + priority.USER_PRIORITY_TIMEOUT;
 
 	while (true) {
-		if (stopping && stopping()) {
-			error = "stopped before the click was made";
-			return false;
-		}
-		if (!wait_for_quiet(
-				priority.USER_PRIORITY_IDLE, deadline, stopping,
-				result.yielded))
-		{
-			error = "stopped while waiting for the desktop to be free";
-			return false;
-		}
+		wait_for_quiet(priority.USER_PRIORITY_IDLE, deadline, result.yielded);
 
 		bool busy = false;
 		if (try_click(window, frame, result, busy, error)) break;
@@ -381,7 +363,6 @@ bool click_at(
 
 	// Out here rather than inside the attempt, so the game gets its moment
 	// to react with the focus already back where it belongs.
-	if (wait_ms > 0)
-		std::this_thread::sleep_for(eb::Millis {wait_ms});
+	if (wait > eb::Millis::zero()) std::this_thread::sleep_for(wait);
 	return true;
 }

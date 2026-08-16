@@ -19,12 +19,14 @@
 // MAX_JUMP_TIMEOUT is this program's, common().CONFIRM_TIMEOUT is
 // everybody's.
 struct ProgramDefaults {
-	// How long a program gives the interface to have something on screen
-	// when it has no reason to want longer.
-	eb::Millis ACTION_TIMEOUT  {2000};
 	// Confirming a click: how long the proof of it is waited for, per
 	// attempt.
 	eb::Millis CONFIRM_TIMEOUT {3000};
+	// How long a click leaves the interface alone before the confirmation
+	// is looked for, when the call site does not name something else. A
+	// press has more to settle than a look does: the panel it opened has
+	// to be drawn before a search can honestly say whether it came.
+	eb::Millis WAIT_CLICK      {100};
 	// Further clicks to make when that proof does not come.
 	int        ACTION_RETRIES  {3};
 };

@@ -51,7 +51,11 @@ private:
 	// Which icon the route panel says is next, waited for until it says
 	// something. That is the whole of the difference between the two kinds
 	// of hop; where it sits is the click's business, not ours.
-	size_t next_waypoint();
+	//
+	// The budget is the hop's rather than this step's, and what is left of
+	// it goes on to the clicks: a panel that took its time to draw leaves
+	// them less, which is the point of them sharing one.
+	size_t next_waypoint(const Budget& reading);
 
 	// What this program works with, named as eve_images.json names it.
 	Pattern GATE {*this, "gate_route"};
@@ -70,7 +74,7 @@ private:
 
 	UndockProgram m_undock;
 
-	// What can be tuned in prog_params.json. The two pauses are the whole of
+	// What can be tuned in prg_params.json. The two pauses are the whole of
 	// what a hop spends on purpose, so they are where a route gets faster.
 	PROG_PARAM(Timeout,  DESTINATION_TIMEOUT, 10000);
 	PROG_PARAM(Timeout,  WARP_TIMEOUT,       300000);

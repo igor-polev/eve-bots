@@ -21,19 +21,17 @@ void quick_span(int at, int size, int margin, int limit, int& start, int& length
 } // namespace
 
 ImageDetector::ImageDetector(
-	ImageLibrary& library, ScreenCapture& capture, PositionCache& cache,
-	int min_margine)
-	: m_library {library}, m_capture {capture}, m_cache {cache},
-	  m_min_margine {min_margine}
+	ImageLibrary& library, ScreenCapture& capture, PositionCache& cache)
+	: m_library {library}, m_capture {capture}, m_cache {cache}
 {
 }
 
 bool ImageDetector::detect(
-	const std::vector<size_t>& images,
-	Detection&                 result,
-	std::string&               error,
-	SearchScope                scope,
-	int                        max_hits)
+	const eb::Images& images,
+	Detection&        result,
+	std::string&      error,
+	SearchScope       scope,
+	int               max_hits)
 {
 	std::lock_guard<std::mutex> lock {m_mutex};
 
@@ -61,13 +59,6 @@ bool ImageDetector::detect(
 		error = "no frame captured yet - is the window minimised?";
 		return false;
 	}
-	for (const Remembered& memo : m_memo) {
-		if (!memo.answers(images, max_hits, scope)) continue;
-		result = memo.answer;
-		result.remembered = true;
-		return true;
-	}
-
 	for (const size_t image : images) {
 		const ImagePattern& pattern = m_library(image);
 		if (pattern.width()  > static_cast<int>(m_frame.width) ||
@@ -83,6 +74,36 @@ bool ImageDetector::detect(
 		}
 	}
 
+	// What is already known about this frame, pattern by pattern. One that
+	// was found answers the whole request, any of them being all that was
+	// asked for; one that was searched and missed need not be searched again.
+	result.scope = scope;
+	result.searched.assign(images.size(), PatternSearch {});
+	std::vector<const Remembered*> known(images.size(), nullptr);
+	bool answered {false};
+	for (size_t at = 0; at < images.size(); ++at) {
+		result.searched[at].image = images[at];
+		for (const Remembered& memo : m_memo) {
+			if (!memo.answers(images[at], max_hits, scope)) continue;
+			known[at]             = &memo;
+			result.searched[at]   = memo.searched;
+			answered              = answered || !memo.hits.empty();
+			break;
+		}
+	}
+	if (answered) {
+		for (size_t at = 0; at < images.size(); ++at) {
+			if (!known[at]) continue;
+			result.hits.insert(
+				result.hits.end(),
+				known[at]->hits.begin(), known[at]->hits.end()
+			);
+		}
+		result.remembered = true;
+		rank_hits(result.hits, max_hits);
+		return true;
+	}
+
 	// The frame is our own copy, so wrapping it costs nothing; the cast is
 	// only needed because cv::Mat has no const-pointer constructor.
 	const cv::Mat captured {
@@ -96,24 +117,24 @@ bool ImageDetector::detect(
 		0, 0, static_cast<int>(m_frame.width), static_cast<int>(m_frame.height)
 	};
 
+	// Hits per pattern, so each can be remembered on its own account. The
+	// answer merges them; the memo does not.
+	std::vector<std::vector<DetectionHit>> mine(images.size());
 	try {
 		// A box is only worth searching when the pattern is known to stay put
 		// along at least one axis and has been seen there at least once. Each
 		// pattern answers that for itself.
-		result.scope = scope;
-		result.searched.reserve(images.size());
 		std::string no_box;
-		for (const size_t image : images) {
-			const ImagePattern& pattern = m_library(image);
-			const cv::Point     last    = m_library.last_hit(image);
+		for (size_t at = 0; at < images.size(); ++at) {
+			if (known[at]) continue;   // searched already, and not there
 
-			PatternSearch part;
-			part.image = image;
+			const ImagePattern& pattern = m_library(images[at]);
+			const cv::Point     last    = m_library.last_hit(images[at]);
 			if (SearchScope::FULL != scope
 				&& ImageLibrary::boxable(pattern, last))
 			{
-				part.scope = SearchScope::BOX;
-				part.box   = quick_box(pattern, last, whole);
+				result.searched[at].scope = SearchScope::BOX;
+				result.searched[at].box   = quick_box(pattern, last, whole);
 			}
 			else if (SearchScope::BOX == scope) {
 				// Skipping it would answer a question nobody asked - "is it
@@ -126,7 +147,6 @@ bool ImageDetector::detect(
 				             + to_utf8(ImageLibrary::FILE_NAME)
 				           : std::string("has not been found yet"));
 			}
-			result.searched.push_back(part);
 		}
 		if (!no_box.empty()) {
 			error  = "no quick search: " + no_box;
@@ -135,36 +155,44 @@ bool ImageDetector::detect(
 		}
 
 		// One pattern's share of the work, wherever it is being looked for.
-		std::vector<DetectionHit> found;
-		const auto look = [&](PatternSearch& part, const cv::Rect& area) {
+		const auto look = [&](size_t at, const cv::Rect& area) {
+			PatternSearch& part = result.searched[at];
 			int mistaken {0};
-			search_area(captured, area, part.image, max_hits, found, mistaken);
+			search_area(captured, area, part.image, max_hits, mine[at], mistaken);
 			part.mistaken += mistaken;
-			if (found.empty()) return;
+			if (mine[at].empty()) return;
 
+			for (DetectionHit& hit : mine[at]) hit.scope = scope;
 			// Remembering where it went is what makes the next search quick.
 			// A position that has not moved is not offered to the cache.
-			const cv::Point corner = found.front().at;
+			const cv::Point corner = mine[at].front().at;
 			if (m_library.set_last_hit(part.image, corner))
 				m_cache.store(m_library(part.image), corner);
-
-			result.hits.insert(result.hits.end(), found.begin(), found.end());
 		};
 
 		// Every box before any full frame: one pattern that has moved must
 		// not cost the others their quick pass.
-		for (PatternSearch& part : result.searched)
-			if (SearchScope::BOX == part.scope) look(part, part.box);
+		bool any {false};
+		for (size_t at = 0; at < images.size(); ++at) {
+			// A remembered part carries the box of the search that made it,
+			// which is not an invitation to search it over again.
+			if (known[at]) continue;
+			if (SearchScope::BOX != result.searched[at].scope) continue;
+			look(at, result.searched[at].box);
+			any = any || !mine[at].empty();
+		}
 
 		// Nothing anywhere means the caller gets the slow answer it asked
 		// for, for all of the patterns, since any of them would do. A box
 		// that did answer spares the rest that cost, and the ones left at
 		// NONE say plainly they were never looked at.
-		if (result.hits.empty() && SearchScope::BOX != scope) {
-			for (PatternSearch& part : result.searched) {
-				part.scope = SearchScope::BOX == part.scope
-					? SearchScope::BOX_THEN_FULL : SearchScope::FULL;
-				look(part, whole);
+		if (!any && SearchScope::BOX != scope) {
+			for (size_t at = 0; at < images.size(); ++at) {
+				if (known[at]) continue;
+				result.searched[at].scope =
+					SearchScope::BOX == result.searched[at].scope
+						? SearchScope::BOX_THEN_FULL : SearchScope::FULL;
+				look(at, whole);
 			}
 		}
 	}
@@ -174,23 +202,42 @@ bool ImageDetector::detect(
 		return false;
 	}
 
+	// Each pattern on its own account, so that a later request naming it
+	// among others finds it here whatever else it is asked alongside.
+	for (size_t at = 0; at < images.size(); ++at) {
+		if (known[at]) continue;
+		result.hits.insert(
+			result.hits.end(), mine[at].begin(), mine[at].end()
+		);
+		// One never looked at settles nothing: another pattern answered
+		// before this one cost anything.
+		if (SearchScope::NONE == result.searched[at].scope) continue;
+		// A miss settles only the ground that was covered; a hit settles
+		// the question that was asked.
+		m_memo.push_back(Remembered {
+			images[at],
+			max_hits,
+			mine[at].empty() ? result.searched[at].scope : scope,
+			result.searched[at],
+			mine[at]
+		});
+	}
+	rank_hits(result.hits, max_hits);
+	return true;
+}
+
+void ImageDetector::rank_hits(std::vector<DetectionHit>& hits, int max_hits)
+{
 	// Best first, whichever pattern it came from, and never more than were
 	// asked for: each pattern may have contributed up to max_hits.
 	std::stable_sort(
-		result.hits.begin(), result.hits.end(),
+		hits.begin(), hits.end(),
 		[](const DetectionHit& one, const DetectionHit& other) {
 			return one.certainty > other.certainty;
 		}
 	);
-	if (static_cast<int>(result.hits.size()) > max_hits)
-		result.hits.resize(static_cast<size_t>(max_hits));
-	for (DetectionHit& hit : result.hits) hit.scope = scope;
-
-	// Kept whole rather than picked apart per pattern: handing back what this
-	// search produced is exact, where rebuilding an answer out of remembered
-	// pieces would be a second implementation of the search.
-	m_memo.push_back(Remembered {images, max_hits, scope, result});
-	return true;
+	if (static_cast<int>(hits.size()) > max_hits)
+		hits.resize(static_cast<size_t>(max_hits));
 }
 
 void ImageDetector::search_area(
@@ -233,7 +280,7 @@ void ImageDetector::search_area(
 	// of step, or a size or two bigger, still gets its best shot. The
 	// candidate is not pinned to the corner the correlation liked, because
 	// that corner is its best by a different measure.
-	int slack = m_min_margine;
+	int slack = MIN_MARGINE;
 	for (const size_t twin : pattern.similar) {
 		const ImagePattern& other = m_library(twin);
 		slack = std::max(slack, std::abs(other.width()  - pattern.width()));
@@ -362,7 +409,7 @@ cv::Point ImageDetector::search_margines(const ImagePattern& pattern) const
 		const int reference =
 			ImagePattern::margine_given(axis) ? size : pattern.longest();
 		return std::max(
-			m_min_margine,
+			MIN_MARGINE,
 			static_cast<int>(std::lround(fraction * reference))
 		);
 	};

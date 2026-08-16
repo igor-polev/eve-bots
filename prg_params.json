@@ -10,20 +10,20 @@
             "NAME"                 : "undock",
             "COMMENT"              : "UNDOCK_BUTTON_TIMEOUT covers finding the undock button, or settling that the ship was never docked. UNDOCK_CLICK_PAUSE is the moment given to the click itself before anything is looked for. IN_SPACE_TIMEOUT then runs until the ship core says the ship is out, which takes as long as the undock animation does.",
             "SHOW_IN_MENU"         : true,
-            "UNDOCK_BUTTON_TIMEOUT": 15000,
+            "UNDOCK_BUTTON_TIMEOUT": 5000,
             "UNDOCK_CLICK_PAUSE"   : 1000,
-            "IN_SPACE_TIMEOUT"     : 45000
+            "IN_SPACE_TIMEOUT"     : 20000
         },
         {
             "NAME"               : "autopilot",
             "COMMENT"            : "DESTINATION_TIMEOUT waits for a gate or station icon in the route panel. WARP_TIMEOUT covers the whole warp, from the command being taken until the warp message has both appeared and gone away again. RECHECK_INTERVAL is the gap between two looks at the same thing - an empty route panel, or a warp still going on. GATE_JUMP_PAUSE and DOCKING_PAUSE let the session change or the docking animation finish, and DOCKING_TIMEOUT waits for the undock button that proves the ship is inside.",
             "SHOW_IN_MENU"       : true,
             "DESTINATION_TIMEOUT": 10000,
-            "WARP_TIMEOUT"       : 300000,
-            "RECHECK_INTERVAL"   : 2000,
-            "GATE_JUMP_PAUSE"    : 5000,
-            "DOCKING_PAUSE"      : 10000,
-            "DOCKING_TIMEOUT"    : 40000
+            "RECHECK_INTERVAL"   : 1000,
+            "WARP_TIMEOUT"       : 120000,
+            "GATE_JUMP_PAUSE"    : 6000,
+            "DOCKING_PAUSE"      : 8000,
+            "DOCKING_TIMEOUT"    : 20000
         }
     ]
 }

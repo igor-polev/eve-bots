@@ -547,7 +547,7 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 
 	// A comma separated list means any of them will do: one search, and
 	// every match reported may have come from any pattern in the list.
-	std::vector<size_t> images;
+	eb::Images images;
 	for (const std::string& token : split_commas(args[0])) {
 		const size_t image = resolve_image(token);
 		if (ImageLibrary::NOT_FOUND == image) return;
@@ -987,7 +987,7 @@ void Cli::cmd_click(const std::vector<std::string>& args)
 	// waiting out the whole timeout on every click made by hand.
 	if (!click_at(
 			m_capture.target(), target, UI_WAIT_DEFAULT,
-			asked_for_by_hand(m_settings.input_priority()), {},
+			asked_for_by_hand(m_settings.input_priority()),
 			clicked, error))
 	{
 		std::cout << "   [ERROR] " << error << "\n";

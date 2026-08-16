@@ -13,187 +13,13 @@
 
 namespace {
 
-// What looking for one pattern ended in.
-enum class Look {
-	FOUND,
-	MISSING,   // not on screen within the budget - an answer, not a fault
-	STOPPED,
-	TROUBLE    // the search itself could not run
-};
+// A program sleeping checks for a stop this often.
+constexpr eb::Millis WAIT_STEP {100};
 
-// Whether whoever asked for something wants it given up on.
-using StopCheck = std::function<bool()>;
-
-// What a click has to produce before it counts, and how hard to insist. A
-// click that lands is not a click that worked: the interface may be busy or
-// the button still drawing itself, and none of that looks any different at
-// the moment the button goes down. The only way to know is to look for what
-// the click was supposed to bring about.
-struct ClickConfirm {
-	// Any one of these appearing is proof enough. Empty asks for no
-	// confirmation, which leaves a plain click.
-	std::vector<size_t> images;
-	// How long to keep looking after each click, in full for every attempt.
-	eb::Millis          timeout {0};
-	// Further clicks to make when one goes unconfirmed.
-	int                 retries {0};
-
-	bool wanted() const noexcept { return !images.empty(); }
-};
-
-enum class Click {
-	CONFIRMED,     // clicked, and the game showed it had been taken
-	DONE,          // clicked, and no confirmation was asked for
-	UNCONFIRMED,   // every allowed click was made and none of them showed
-	STOPPED,
-	TROUBLE        // the click, or the search after it, could not be done
-};
-
-// What a click came to, whether or not it was confirmed.
-struct ClickReport {
-	ClickResult click;            // the last click that was made
-	int         clicks {0};       // how many were made in all
-	cv::Point   at;               // where the confirmation was seen
-	size_t      image {0};        // which pattern it turned out to be
-};
-
-// A program sleeping between attempts checks for a stop this often.
-constexpr eb::Millis WAIT_STEP {50};
-
-// Pause between two attempts at the same pattern. A full frame search
-// already costs seconds, so this only matters once a quick box search is
-// possible - and then it keeps a program from spinning on the CPU.
-constexpr eb::Millis RETRY_PAUSE {250};
-
-// Nothing anybody would write in prog_params.json, so asking for a value
-// with this as the fallback answers "was there a number there at all?"
-// as well as "what was it?".
+// Nothing anybody would write in prg_params.json, so asking for a value with
+// this as the fallback answers "was there a number there at all?" as well as
+// "what was it?".
 constexpr double NOT_A_NUMBER = -1e18;
-
-bool asked_to_stop(const StopCheck& stopping)
-{
-	return stopping && stopping();
-}
-
-// The three below are what Program's own waiting and looking are made of,
-// written without the program so that confirmed_click() - which anybody may
-// call, program or console - can be made of them too.
-
-bool rest(eb::Millis duration, const StopCheck& stopping)
-{
-	for (eb::Millis left = duration;
-	     left > eb::Millis::zero();
-	     left -= WAIT_STEP)
-	{
-		if (asked_to_stop(stopping)) return false;
-		std::this_thread::sleep_for(std::min(WAIT_STEP, left));
-	}
-	return !asked_to_stop(stopping);
-}
-
-// The budget is what is left to keep trying for, not a limit on the search
-// itself: a search runs to its answer, and a slow one that finds the pattern
-// is not a failure. So it is spent between attempts rather than during one.
-Look one_look(
-	ProgramContext&            context,
-	const std::vector<size_t>& images,
-	eb::Millis                 budget,
-	const StopCheck&           stopping,
-	cv::Point&                 corner,
-	size_t&                    found,
-	std::string&               trouble)
-{
-	if (asked_to_stop(stopping)) return Look::STOPPED;
-	if (budget <= eb::Millis::zero()) return Look::MISSING;
-
-	ImageDetector::Detection seen;
-	if (!context.detector.detect(images, seen, trouble)) return Look::TROUBLE;
-	if (seen.hits.empty()) return Look::MISSING;
-
-	corner = seen.hits.front().at;
-	found  = seen.hits.front().image;
-	return Look::FOUND;
-}
-
-Look keep_looking(
-	ProgramContext&            context,
-	const std::vector<size_t>& images,
-	eb::Millis                 budget,
-	const StopCheck&           stopping,
-	cv::Point&                 corner,
-	size_t&                    found,
-	std::string&               trouble)
-{
-	const eb::TimePoint deadline = eb::Clock::now() + budget;
-	while (true) {
-		const auto left = std::chrono::duration_cast<eb::Millis>(
-			deadline - eb::Clock::now()
-		);
-		if (left <= eb::Millis::zero()) return Look::MISSING;
-
-		const Look seen =
-			one_look(context, images, left, stopping, corner, found, trouble);
-		// Only "not on screen this time" is worth another attempt.
-		if (Look::MISSING != seen) return seen;
-
-		if (!rest(RETRY_PAUSE, stopping)) return Look::STOPPED;
-	}
-}
-
-// Clicks a point of the captured window and, when a confirmation was asked
-// for, waits for proof that the game took it - clicking again up to retries
-// times when none arrives. error is filled for TROUBLE and UNCONFIRMED
-// alone; stopping may be empty, and is then never asked.
-Click confirmed_click(
-	ProgramContext&     context,
-	const cv::Point&    target,
-	int                 wait_ms,
-	const ClickConfirm& confirm,
-	const StopCheck&    stopping,
-	ClickReport&        report,
-	std::string&        error)
-{
-	report = ClickReport {};
-
-	// The first click, plus however many further ones were allowed. A
-	// negative retry count is read as none rather than refused: it can
-	// only have come from arithmetic, and one click is what it meant.
-	const int attempts = 1 + std::max(0, confirm.retries);
-	for (int attempt = 0; attempt < attempts; ++attempt) {
-		if (asked_to_stop(stopping)) return Click::STOPPED;
-
-		if (!click_at(
-				context.capture.target(), target, wait_ms,
-				context.priority, stopping, report.click, error))
-		{
-			// Clicking failed outright. A desktop busy with somebody else
-			// has already been waited out in there, so what is left is the
-			// window being gone or the input refused - which another
-			// attempt would meet in exactly the same state. This is not
-			// what the retries are for.
-			return Click::TROUBLE;
-		}
-		++report.clicks;
-
-		// Nothing to wait for: the click was made, and that was all that
-		// was asked of it.
-		if (!confirm.wanted()) return Click::DONE;
-
-		const Look seen = keep_looking(
-			context, confirm.images, confirm.timeout, stopping,
-			report.at, report.image, error
-		);
-		switch (seen) {
-		case Look::FOUND:   return Click::CONFIRMED;
-		case Look::STOPPED: return Click::STOPPED;
-		case Look::TROUBLE: return Click::TROUBLE;
-		default:            break;   // not there yet, so click again
-		}
-	}
-
-	error = context.images.names_text(confirm.images) + " did not follow";
-	return Click::UNCONFIRMED;
-}
 
 } // namespace
 
@@ -474,8 +300,16 @@ ProgramResult Program::done(std::string description)
 
 void Program::rest_or_stop(eb::Millis duration, const std::string& what) const
 {
-	if (!rest(duration, [this] { return stopping(); }))
-		stopped_while("waiting for " + what);
+	// In steps rather than in one sleep, so a stop asked for in the middle
+	// of a long pause is noticed while it is still worth noticing.
+	for (eb::Millis left = duration;
+	     left > eb::Millis::zero();
+	     left -= WAIT_STEP)
+	{
+		if (stopping()) stopped_while("waiting for " + what);
+		std::this_thread::sleep_for(std::min(WAIT_STEP, left));
+	}
+	if (stopping()) stopped_while("waiting for " + what);
 }
 
 void Program::pause(const Pause& duration, const std::string& what) const
@@ -488,97 +322,116 @@ void Program::pause(const Interval& duration, const std::string& what) const
 	rest_or_stop(duration.value(), what);
 }
 
-Program::Sighting Program::appear(
-	const std::string&         what,
-	const std::vector<size_t>& images,
-	eb::Millis                 budget) const
+std::string Program::named(const eb::Images& images) const
 {
-	Sighting    seen;
-	std::string trouble;
-	const Look  looked = keep_looking(
-		context(), images, budget, [this] { return stopping(); },
-		seen.at, seen.image, trouble
-	);
-	if (Look::FOUND == looked)   return seen;
-	if (Look::STOPPED == looked) stopped_while("waiting for " + what);
-	if (Look::TROUBLE == looked) fail("cannot look for " + what + ": " + trouble);
-	fail(what + " did not appear");
+	return context().images.names_text(images);
 }
 
-void Program::vanish(
-	const std::string& what,
-	size_t             image,
-	const Budget&      budget,
-	const Interval&    recheck) const
+bool Program::visible(const eb::Images& images, Sighting& seen, Scope scope) const
 {
-	while (true) {
-		rest_or_stop(recheck.value(), what + " to go");
+	if (stopping()) stopped_while("looking for " + named(images));
 
-		const eb::Millis left = budget.left();
-		if (left <= eb::Millis::zero())
-			fail(what + " never went away");
-		if (!sighted(what, {image}, left)) return;
+	ImageDetector::Detection found;
+	std::string              trouble;
+	if (!context().detector.detect(images, found, trouble, scope))
+		fail("cannot look for " + named(images) + ": " + trouble);
+	if (found.hits.empty()) return false;
+
+	seen.at    = found.hits.front().at;
+	seen.image = found.hits.front().image;
+	return true;
+}
+
+bool Program::watch(
+	const eb::Images& images,
+	eb::Millis        timeout,
+	Sighting&         seen,
+	Scope             scope) const
+{
+	const eb::TimePoint deadline = eb::Clock::now() + timeout;
+	while (true) {
+		if (visible(images, seen, scope)) return true;
+		if (eb::Clock::now() >= deadline) return false;
+
+		// One frame's worth, because nothing on screen can have changed
+		// until capture has taken another: searching the same frame again
+		// would hand back the same answer out of the detector's memory.
+		rest_or_stop(
+			context().capture.frame_life(), named(images) + " to appear"
+		);
 	}
 }
 
-bool Program::sighted(
-	const std::string&         what,
-	const std::vector<size_t>& images,
-	eb::Millis                 budget,
-	Sighting*                  seen) const
+Program::Sighting Program::appear(
+	const eb::Images& images, eb::Millis timeout, Scope scope) const
 {
-	Sighting    anywhere;
-	Sighting&   into = seen ? *seen : anywhere;
-	std::string trouble;
-	const Look  looked = one_look(
-		context(), images, budget, [this] { return stopping(); },
-		into.at, into.image, trouble
-	);
-	if (Look::FOUND == looked)   return true;
-	if (Look::MISSING == looked) return false;
-	if (Look::STOPPED == looked) stopped_while("looking for " + what);
-	fail("cannot look for " + what + ": " + trouble);
+	Sighting seen;
+	if (!watch(images, timeout, seen, scope))
+		fail(named(images) + " did not appear");
+	return seen;
+}
+
+void Program::vanish(
+	size_t          image,
+	const Budget&   budget,
+	const Interval& recheck,
+	Scope           scope) const
+{
+	const std::string what = named(eb::Images {image});
+	while (true) {
+		rest_or_stop(recheck.value(), what + " to go");
+
+		if (budget.left() <= eb::Millis::zero())
+			fail(what + " never went away");
+		if (!visible(image, scope)) return;
+	}
 }
 
 void Program::click(
-	const std::string&         what,
-	size_t                     image,
-	const std::vector<size_t>& confirm) const
+	size_t            image,
+	eb::Millis        src_to,
+	eb::Millis        wait,
+	const eb::Images& confirm,
+	eb::Millis        conf_to,
+	int               retries) const
 {
 	// Where it is now, which is not always where whoever asked for the click
 	// last saw it. Failing to find it here is the same failure as failing to
 	// find it anywhere else, so appear() reports it.
-	const cv::Point corner =
-		appear(what, {image}, common().ACTION_TIMEOUT).at;
+	const cv::Point corner = appear(image, src_to);
 
 	const ImagePattern& pattern = context().images(image);
-	const cv::Point target =
+	const cv::Point     target =
 		corner + cv::Point {pattern.width() / 2, pattern.height() / 2};
 
-	// The usual confirmation: any one of these patterns, waited for and
-	// insisted on exactly as eve_config.json says. Spelling those two out
-	// at every call site would only invite one of them to drift.
-	ClickConfirm wanted;
-	wanted.images  = confirm;
-	wanted.timeout = common().CONFIRM_TIMEOUT;
-	wanted.retries = common().ACTION_RETRIES;
+	const std::string what = named(eb::Images {image});
+	// The first click, plus however many further ones were allowed. A
+	// negative count asks for what eve_config.json says.
+	const int attempts =
+		1 + (retries < 0 ? common().ACTION_RETRIES : retries);
+	for (int attempt = 0; attempt < attempts; ++attempt) {
+		if (stopping()) stopped_while("clicking " + what);
 
-	ClickReport report;
-	std::string trouble;
-	const Click clicked = confirmed_click(
-		context(),
-		target,
-		UI_WAIT_DEFAULT,
-		wanted,
-		[this] { return stopping(); },
-		report,
-		trouble
-	);
-	if (Click::CONFIRMED == clicked)   return;
-	if (Click::DONE == clicked)        return;
-	if (Click::STOPPED == clicked)     stopped_while("clicking " + what);
-	if (Click::UNCONFIRMED == clicked) fail(what + " did not take: " + trouble);
-	fail("cannot click " + what + ": " + trouble);
+		ClickResult made;
+		std::string trouble;
+		if (!click_at(
+				context().capture.target(), target, wait,
+				context().priority, made, trouble))
+		{
+			// A desktop busy with somebody else has already been waited out
+			// in there, so what is left is the window being gone or the
+			// input refused - which another attempt would meet in exactly
+			// the same state. This is not what the retries are for.
+			fail("cannot click " + what + ": " + trouble);
+		}
+		// Nothing to wait for: the click was made, and that was all that was
+		// asked of it.
+		if (confirm.empty()) return;
+
+		Sighting seen;
+		if (watch(confirm, conf_to, seen, Scope::BOX)) return;
+	}
+	fail(what + " did not take: " + named(confirm) + " did not follow");
 }
 
 ProgramRunner::~ProgramRunner()

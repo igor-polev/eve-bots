@@ -2,7 +2,7 @@
 	EVE bots for Windows.
 	Author: Igor Polev.
 
-	ProgramParams - what prog_params.json says about each program.
+	ProgramParams - what prg_params.json says about each program.
 
 	Programs carry their own defaults, so this file only ever overrides
 	them. That is why a missing file is not fatal the way missing settings
@@ -19,7 +19,7 @@
 
 class ProgramParams {
 public:
-	static constexpr const wchar_t* FILE_NAME = L"prog_params.json";
+	static constexpr const wchar_t* FILE_NAME = L"prg_params.json";
 
 	// Looks for FILE_NAME in the working directory, then next to the
 	// executable. Returns false only when a file was found and could not

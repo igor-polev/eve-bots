@@ -29,7 +29,7 @@ public:
 		: m_settings {settings}, m_images {images}, m_params {params},
 		  m_positions {positions},
 		  m_capture {settings.capture_frame_rate()},
-		  m_detector {images, m_capture, positions, settings.min_margine()} {}
+		  m_detector {images, m_capture, positions} {}
 
 	// Reads and dispatches commands until 'exit'. Returns process exit code.
 	int run();

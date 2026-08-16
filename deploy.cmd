@@ -54,7 +54,7 @@ copy /Y "%RELEASE%\*.dll" "%DEST%\" >nul || goto :failed
 
 rem  Named one by one on purpose: "*.json" would also drag in
 rem  CMakePresets.json and vcpkg.json, which belong to the build.
-for %%F in (eve_config.json eve_images.json prog_params.json) do (
+for %%F in (eve_config.json eve_images.json prg_params.json) do (
     copy /Y "%REPO%\%%F" "%DEST%\" >nul || goto :failed
 )
 

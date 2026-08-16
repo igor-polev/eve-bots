@@ -413,7 +413,7 @@ bool ImageLibrary::link_similar(
 	// naming it on either pattern is enough.
 	for (size_t at = 0; at < patterns.size(); ++at) {
 		for (const size_t twin : patterns[at].similar) {
-			std::vector<size_t>& back = patterns[twin].similar;
+			eb::Images& back = patterns[twin].similar;
 			if (back.end() == std::find(back.begin(), back.end(), at))
 				back.push_back(at);
 		}
@@ -460,7 +460,7 @@ std::string ImageLibrary::name_list() const
 	return list;
 }
 
-std::string ImageLibrary::names_text(const std::vector<size_t>& images) const
+std::string ImageLibrary::names_text(const eb::Images& images) const
 {
 	std::string text;
 	for (size_t at = 0; at < images.size(); ++at) {

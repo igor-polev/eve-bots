@@ -23,11 +23,10 @@ constexpr const char* KEY_TITLE_PREFIX = "EVE_WINDOW_TITLE_PREFIX";
 constexpr const char* KEY_FRAME_RATE   = "CAPTURE_FRAME_RATE_DEFAULT";
 constexpr const char* KEY_IMAGE_DIR    = "IMAGE_LIBRARY_DIR";
 constexpr const char* KEY_THRESHOLD    = "DETECT_THRESHOLD_DEFAULT";
-constexpr const char* KEY_MIN_MARGINE  = "MIN_MARGINE";
 constexpr const char* KEY_MENU_HOTKEY  = "MENU_HOTKEY";
 constexpr const char* KEY_AUTOSTART    = "AUTOSTART_CAPTURE";
-constexpr const char* KEY_ACTION_TIMEOUT  = "ACTION_TIMEOUT_DEFAULT";
 constexpr const char* KEY_CONFIRM_TIMEOUT = "CONFIRM_TIMEOUT_DEFAULT";
+constexpr const char* KEY_WAIT_CLICK      = "WAIT_CLICK_DEFAULT";
 constexpr const char* KEY_ACTION_RETRIES  = "ACTION_RETRIES_DEFAULT";
 constexpr const char* KEY_USER_IDLE       = "USER_PRIORITY_IDLE";
 constexpr const char* KEY_USER_TIMEOUT    = "USER_PRIORITY_TIMEOUT";
@@ -96,9 +95,8 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 	EveWindowMatch eve_window;
 	std::wstring image_dir;
 	int64_t frame_rate      {0};
-	int64_t min_margine     {0};
-	int64_t action_timeout  {0};
 	int64_t confirm_timeout {0};
+	int64_t wait_click      {0};
 	int64_t action_retries  {0};
 	int64_t user_idle       {0};
 	int64_t user_timeout    {0};
@@ -123,9 +121,8 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 			);
 		threshold = certainty.get<double>();
 
-		min_margine     = read_whole(settings, KEY_MIN_MARGINE);
-		action_timeout  = read_whole(settings, KEY_ACTION_TIMEOUT);
 		confirm_timeout = read_whole(settings, KEY_CONFIRM_TIMEOUT);
+		wait_click      = read_whole(settings, KEY_WAIT_CLICK);
 		action_retries  = read_whole(settings, KEY_ACTION_RETRIES);
 		user_idle       = read_whole(settings, KEY_USER_IDLE);
 		user_timeout    = read_whole(settings, KEY_USER_TIMEOUT);
@@ -140,9 +137,8 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		      + KEY_FRAME_RATE   + ", "
 		      + KEY_IMAGE_DIR    + ", "
 		      + KEY_THRESHOLD    + ", "
-		      + KEY_MIN_MARGINE  + ", "
-		      + KEY_ACTION_TIMEOUT  + ", "
 		      + KEY_CONFIRM_TIMEOUT + ", "
+		      + KEY_WAIT_CLICK      + ", "
 		      + KEY_ACTION_RETRIES  + ", "
 		      + KEY_USER_IDLE       + ", "
 		      + KEY_USER_TIMEOUT    + ", "
@@ -155,19 +151,22 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		return false;
 	}
 
-	// A click that gives the game no time at all to react is a click that
-	// will never be confirmed, and one that keeps looking forever is a
-	// program that never reports a failure.
-	if (action_timeout < 0) {
-		error = std::string(KEY_ACTION_TIMEOUT)
-		      + " is milliseconds and cannot be negative (got "
-		      + std::to_string(action_timeout) + ")";
-		return false;
-	}
+	// A click that keeps looking forever is a program that never reports a
+	// failure.
 	if (confirm_timeout < 1) {
 		error = std::string(KEY_CONFIRM_TIMEOUT)
 		      + " is milliseconds and must be at least 1 (got "
 		      + std::to_string(confirm_timeout) + ")";
+		return false;
+	}
+	// No wait at all is meaningful - it says this client keeps up - so only
+	// the upper end is guarded. Every confirmed click a program makes pays
+	// this, so a long one is not wrong, only slow.
+	if (wait_click < 0 || wait_click > MAX_WAIT_CLICK) {
+		error = std::string(KEY_WAIT_CLICK)
+		      + " is milliseconds and must be between 0 and "
+		      + std::to_string(MAX_WAIT_CLICK)
+		      + " (got " + std::to_string(wait_click) + ")";
 		return false;
 	}
 	if (action_retries < 0 || action_retries > MAX_ACTION_RETRIES) {
@@ -246,26 +245,16 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		error = std::string(KEY_IMAGE_DIR) + " is empty in " + to_utf8(path);
 		return false;
 	}
-	// Zero would leave a search window exactly the size of the pattern,
-	// with no room for anything to have moved a pixel.
-	if (min_margine < 1 || min_margine > MAX_MIN_MARGINE) {
-		error = std::string(KEY_MIN_MARGINE) + " is in pixels and must be "
-		      + "between 1 and " + std::to_string(MAX_MIN_MARGINE)
-		      + " (got " + std::to_string(min_margine) + ")";
-		return false;
-	}
-
 	m_eve_window         = std::move(eve_window);
 	m_capture_frame_rate = static_cast<unsigned>(frame_rate);
 	m_detect_threshold   = threshold;
-	m_min_margine        = static_cast<int>(min_margine);
 	m_menu_hotkey        = menu_hotkey;
 	m_autostart_capture  = autostart;
-	m_defaults.ACTION_TIMEOUT  = std::chrono::milliseconds {action_timeout};
-	m_defaults.CONFIRM_TIMEOUT = std::chrono::milliseconds {confirm_timeout};
+	m_defaults.CONFIRM_TIMEOUT = eb::Millis {confirm_timeout};
+	m_defaults.WAIT_CLICK      = eb::Millis {wait_click};
 	m_defaults.ACTION_RETRIES  = static_cast<int>(action_retries);
-	m_priority.USER_PRIORITY_IDLE    = std::chrono::milliseconds {user_idle};
-	m_priority.USER_PRIORITY_TIMEOUT = std::chrono::milliseconds {user_timeout};
+	m_priority.USER_PRIORITY_IDLE    = eb::Millis {user_idle};
+	m_priority.USER_PRIORITY_TIMEOUT = eb::Millis {user_timeout};
 	// a relative image folder is meant relative to the settings file,
 	// not to whatever directory the app happens to be started from
 	m_image_dir          = join_path(directory_of(path), image_dir);

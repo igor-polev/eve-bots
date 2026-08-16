@@ -34,10 +34,10 @@ private:
 	Pattern UNDOCK   {*this, "undock"};
 	Pattern SHIPCORE {*this, "shipcore"};
 
-	// What can be tuned in prog_params.json, and what it is without it.
+	// What can be tuned in prg_params.json, and what it is without it.
 	// UNDOCK_CLICK_PAUSE is the only time this program spends on purpose;
 	// the two timeouts are only ever paid when something is wrong.
-	PROG_PARAM(Timeout, UNDOCK_BUTTON_TIMEOUT, 15000);
-	PROG_PARAM(Pause,   UNDOCK_CLICK_PAUSE,     1000);
+	PROG_PARAM(Timeout, UNDOCK_BUTTON_TIMEOUT,  5000);
+	PROG_PARAM(Pause,   UNDOCK_CLICK_PAUSE,     7000);
 	PROG_PARAM(Timeout, IN_SPACE_TIMEOUT,      45000);
 };
