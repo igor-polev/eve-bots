@@ -13,8 +13,8 @@
 
 void add_programs(ProgramRunner& runner)
 {
-	// Order is the order 'programs' lists them in and the menu shows them,
-	// so the simplest first.
+	// This order is the one 'programs' lists and the menu shows, so the
+	// simplest program comes first.
 	runner.add(std::make_unique<UndockProgram>());
 	runner.add(std::make_unique<AutopilotProgram>());
 }

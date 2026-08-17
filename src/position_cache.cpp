@@ -13,9 +13,9 @@
 #include "position_cache.hpp"
 #include "text_util.hpp"
 
-// Insertion order is kept, so the file reads the way it was written rather
-// than alphabetically - the character and the frame size stay at the top of
-// each entry, where somebody opening the file looks for them.
+// Keys keep the order they were added in, so the file reads the way it was
+// written and not in alphabetical order. The character and the frame size
+// stay at the top of each entry, where a reader looks for them.
 using json = nlohmann::ordered_json;
 
 namespace {
@@ -28,12 +28,12 @@ constexpr const char* KEY_IMAGES    = "IMAGES";
 constexpr const char* KEY_X         = "X";
 constexpr const char* KEY_Y         = "Y";
 
-// Indentation of the written file. It is meant to be read and, when
-// something goes odd, edited by hand.
+// Indentation of the written file. People are meant to read it and, when
+// something looks wrong, edit it by hand.
 constexpr int INDENT = 4;
 
-// One coordinate out of a cached corner. An absent key means the pattern
-// does not hold still along that axis, which is not an error.
+// One coordinate of a cached corner. A missing key means the pattern does
+// not stay in place along that axis, which is not an error.
 bool read_axis(const json& position, const char* key, int& value)
 {
 	const auto found = position.find(key);
@@ -55,7 +55,7 @@ bool PositionCache::load(const std::wstring& path, std::string& error)
 	m_entries.clear();
 	m_current = NONE;
 
-	// Nothing to read on a first run, and nothing to complain about.
+	// On a first run there is nothing to read and nothing to complain about.
 	if (!file_exists(path)) return true;
 
 	std::ifstream file {path};
@@ -143,8 +143,8 @@ PositionCache::Follow PositionCache::follow(
 {
 	std::lock_guard<std::mutex> lock {m_mutex};
 
-	// Already on this client: the library holds everything the file does
-	// and more, since the free axes only ever live in memory.
+	// Already on this client. The library holds everything the file holds
+	// and more, because the free axes live only in memory.
 	if (NONE != m_current) {
 		const Entry& followed = m_entries[m_current];
 		if (followed.character == character &&
@@ -154,7 +154,7 @@ PositionCache::Follow PositionCache::follow(
 		}
 	}
 
-	// A different client, so what is remembered is about somewhere else.
+	// A different client, so what is remembered belongs somewhere else.
 	images.forget_hits();
 
 	m_current = NONE;
@@ -167,8 +167,8 @@ PositionCache::Follow PositionCache::follow(
 		}
 	}
 	if (NONE == m_current) {
-		// Nothing filed for this client yet; the entry starts empty and
-		// fills as patterns are found.
+		// Nothing filed for this client yet. The entry starts empty and
+		// fills up as patterns are found.
 		m_entries.push_back(Entry {character, width, height, {}});
 		m_current = m_entries.size() - 1;
 		return Follow {true, 0};
@@ -176,15 +176,15 @@ PositionCache::Follow PositionCache::follow(
 
 	Follow result {true, 0};
 	for (const auto& [name, corner] : m_entries[m_current].images) {
-		// A name the library no longer knows is left in the file rather than
-		// dropped: it costs one line, and a pattern taken out of
+		// A name the library no longer knows is left in the file, not
+		// dropped. It costs one line, and a pattern removed from
 		// eve_images.json for an afternoon comes back to its old position.
 		const size_t image = images.index(name);
 		if (ImageLibrary::NOT_FOUND == image) continue;
 
-		// Only the axes the pattern holds still along today. The file may
-		// have been written when FIXED_DIRECTIONS said something else, and
-		// a coordinate that is free now is worse than no coordinate.
+		// Only the axes the pattern stays in place along today. The file may
+		// have been written when FIXED_DIRECTIONS said something else, and a
+		// coordinate that is free now is worse than no coordinate.
 		const ImagePattern& pattern = images(image);
 		const cv::Point restored {
 			pattern.fixed_x() ? corner.x : ImageLibrary::UNKNOWN,
@@ -200,8 +200,8 @@ PositionCache::Follow PositionCache::follow(
 
 bool PositionCache::store(const ImagePattern& pattern, const cv::Point& corner)
 {
-	// A pattern that can turn up anywhere is never searched for in a box,
-	// so where it was last time is of no use to anybody.
+	// A pattern that can appear anywhere is never searched for in a box, so
+	// where it was last time is of no use.
 	if (FIXED_NONE == pattern.fixed_directions) return false;
 
 	std::lock_guard<std::mutex> lock {m_mutex};
@@ -226,8 +226,8 @@ bool PositionCache::store(const ImagePattern& pattern, const cv::Point& corner)
 		m_error.clear();
 		return true;
 	}
-	// Put the model back to what the file actually holds, so the next
-	// detection writes again instead of believing this one landed.
+	// Put the data in memory back to what the file really holds, so the next
+	// detection writes again instead of believing this write worked.
 	if (known) kept[pattern.name] = previous;
 	else       kept.erase(pattern.name);
 	m_error = trouble;
@@ -254,8 +254,8 @@ bool PositionCache::save(std::string& error) const
 			json position = json::object();
 			if (corner.x > ImageLibrary::UNKNOWN) position[KEY_X] = corner.x;
 			if (corner.y > ImageLibrary::UNKNOWN) position[KEY_Y] = corner.y;
-			// An entry with neither axis says nothing; leaving it out keeps
-			// the file from growing rows that mean "no idea".
+			// An entry with neither axis says nothing. Leaving it out keeps
+			// lines that mean "nothing known" out of the file.
 			if (!position.empty()) images[name] = std::move(position);
 		}
 		entries.push_back(std::move(written));

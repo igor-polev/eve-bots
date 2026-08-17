@@ -23,7 +23,7 @@
 
 class Cli {
 public:
-	// All four must outlive the Cli object.
+	// All four must live longer than the Cli object.
 	Cli(const Settings& settings, ImageLibrary& images,
 	    const ProgramParams& params, PositionCache& positions)
 		: m_settings {settings}, m_images {images}, m_params {params},
@@ -50,15 +50,15 @@ private:
 	void cmd_run(const std::vector<std::string>& args);
 	void cmd_abort();
 
-	// Registers the programs and hands them their parameters. False when a
-	// parameter is unusable, which stops the application.
+	// Registers the programs and gives them their parameters. False when a
+	// parameter cannot be used, which stops the application.
 	bool load_programs();
-	// Puts the pop-up menu up on its hotkey. Says what came of it and
-	// carries on either way: the menu is a convenience, and everything it
-	// offers can be typed.
+	// Starts the pop-up menu on its hotkey. Says what happened and goes on
+	// either way, because the menu only saves typing: everything it offers
+	// can also be typed.
 	void load_menu();
-	// Captures a client as the application starts, when the settings ask
-	// for it. Asks which one when there is more than one to choose from.
+	// Captures a client when the application starts, if the settings ask
+	// for it. Asks which one when there is more than one.
 	void autostart_capture();
 	// What the menu clicks do. Called on the menu's thread.
 	void start_from_menu(size_t program);
@@ -66,18 +66,18 @@ private:
 
 	// Prints the outcome of a run. Called on the program thread.
 	void report_program(const std::string& name, const ProgramResult& result);
-	// Says something from a thread that is not the console's, where the
-	// prompt is most likely already printed and waiting.
+	// Prints from a thread that is not the console thread, where the prompt
+	// is most likely already printed and waiting.
 	void print_note(const std::string& text) const;
 
 	void print_windows() const;
-	// Files the positions of the window capture has just been pointed at
-	// under whoever is logged in there, and hands back what was remembered
-	// for that client last time. Prints what it did.
+	// Files the positions of the newly captured window under the character
+	// logged in there, and gives back what was remembered for that client
+	// last time. Prints what it did.
 	void follow_positions(const WindowInfo& target);
-	// Turns a command line token into a library position, taking either a
-	// name or the index 'images' prints. NOT_FOUND when it is neither, the
-	// complaint having already been printed.
+	// Turns a command line word into a library index. It takes either a
+	// name or the number that 'images' prints. NOT_FOUND when it is
+	// neither, and the complaint is already printed by then.
 	size_t resolve_image(const std::string& token) const;
 
 	const Settings&      m_settings;
@@ -90,11 +90,11 @@ private:
 	ScreenCapture           m_capture;
 	ImageDetector           m_detector;
 	ProgramRunner           m_programs;
-	// Which programs the menu offers, in the order it lists them. Settled
-	// once at startup, so what the menu hands back can be turned into a
-	// program the runner knows.
+	// Which programs the menu offers, in the order it lists them. Fixed at
+	// startup, so what the menu gives back can be turned into a program the
+	// runner knows.
 	std::vector<size_t>     m_menu_programs;
-	// Declared last so it is torn down first: its thread calls back into
-	// the runner, which must still be here when it does.
+	// Declared last, so it is destroyed first. Its thread calls back into
+	// the runner, which must still exist at that moment.
 	ProgramMenu             m_menu;
 };

@@ -14,17 +14,17 @@
 #include "common_defs.hpp"
 
 struct InputPriority {
-	// How long the user must have been quiet before a click is made. Zero
-	// is the bot-first mode, where the interrupted work is the user's.
+	// How long the user must be quiet before a click is made. Zero means
+	// the bot goes first, and the user is the one interrupted.
 	eb::Millis USER_PRIORITY_IDLE    {0};
-	// Where the politeness ends: past this the click is made regardless,
-	// and it bounds the wait for a covered point to clear as well.
+	// Where the waiting ends: after this the click is made anyway. It also
+	// limits the wait for a covered point to become free.
 	eb::Millis USER_PRIORITY_TIMEOUT {0};
 };
 
-// What a click asked for at the console runs under. Whoever typed it was
-// using the keyboard a moment ago, so requiring them to be idle would mean
-// waiting out the timeout on every single one.
+// What a click typed at the console runs under. The person who typed it was
+// using the keyboard a moment before, so waiting for them to be quiet would
+// mean waiting out the whole timeout on every click.
 inline InputPriority asked_for_by_hand(const InputPriority& configured)
 {
 	return InputPriority {eb::Millis {0}, configured.USER_PRIORITY_TIMEOUT};

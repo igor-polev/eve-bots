@@ -4,9 +4,9 @@
 
 	Narrow/wide string conversion helpers.
 
-	The console is switched to UTF-8 in main(), so window titles are
-	converted to UTF-8 for display rather than using wcout (mixing
-	cout and wcout on the same stream is unreliable).
+	main() switches the console to UTF-8, so window titles are converted to
+	UTF-8 for printing instead of using wcout. Mixing cout and wcout on the
+	same stream does not work reliably.
 */
 
 #pragma once

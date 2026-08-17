@@ -14,18 +14,16 @@
 
 #include "common_defs.hpp"
 
-// Named the way a program's own parameters are, and read through common(),
-// so that a call site says which of the two a number came from:
-// MAX_JUMP_TIMEOUT is this program's, common().CONFIRM_TIMEOUT is
-// everybody's.
+// Named like a program's own parameters, and read through common(), so a
+// call site shows where a number comes from: MAX_JUMP_TIMEOUT belongs to
+// this program, common().CONFIRM_TIMEOUT belongs to every program.
 struct ProgramDefaults {
-	// Confirming a click: how long the proof of it is waited for, per
-	// attempt.
+	// Confirming a click: how long to wait for the proof, for each attempt.
 	eb::Millis CONFIRM_TIMEOUT {3000};
-	// How long a click leaves the interface alone before the confirmation
-	// is looked for, when the call site does not name something else. A
-	// press has more to settle than a look does: the panel it opened has
-	// to be drawn before a search can honestly say whether it came.
+	// How long a click leaves the interface alone before the proof is
+	// looked for, when the call site does not give another value. A press
+	// needs more time than a look: the panel it opened must be drawn before
+	// a search can say whether it is there.
 	eb::Millis WAIT_CLICK      {100};
 	// Further clicks to make when that proof does not come.
 	int        ACTION_RETRIES  {3};

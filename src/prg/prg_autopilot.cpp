@@ -9,8 +9,7 @@
 
 namespace {
 
-// Put in front of every message so a failure says which hop it happened
-// on.
+// Goes in front of every message, so a failure says which hop it was on.
 std::string hop_text(int hop)
 {
 	return "hop " + std::to_string(hop);
@@ -26,8 +25,8 @@ std::string AutopilotProgram::purpose() const
 bool AutopilotProgram::configure(
 	const ProgramParams& params, std::string& error)
 {
-	// The undock program runs as the first step, so it reads its own
-	// section of the file exactly as it would on its own.
+	// The undock program runs as the first step, so it reads its own part
+	// of the file just as it would when run alone.
 	if (!m_undock.configure(params, error)) {
 		error = "the undock step it starts with rejected its settings: " + error;
 		return false;

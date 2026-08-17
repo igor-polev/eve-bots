@@ -15,7 +15,7 @@ std::string UndockProgram::purpose() const
 ProgramResult UndockProgram::run()
 {
 	const Budget search {UNDOCK_BUTTON_TIMEOUT};
-	if (visible(SHIPCORE, Scope::BOX_THEN_FULL))
+	if (visible(SHIPCORE, eb::Scope::BOX_THEN_FULL))
 		return done("already in space, nothing to undock");
 	click(UNDOCK, search, UNDOCK_CLICK_PAUSE, {SHIPCORE}, IN_SPACE_TIMEOUT);
 

@@ -5,14 +5,14 @@
 	Program - one automated job, and the runner that hosts it.
 
 	A program runs on its own thread and reports back an outcome and a line
-	of text. Stopping is cooperative: abort() raises a flag the program
-	notices at its next action, since a thread torn down mid-click would
-	leave the mouse button held.
+	of text. Stopping needs the program's help: abort() only raises a flag,
+	and the program sees it at its next action. Killing the thread in the
+	middle of a click would leave the mouse button pressed.
 
-	Everything here exists so that a program body can be a sequence of
+	Everything here is here so that the body of a program can be a list of
 	actions and nothing else. The actions throw ProgramError instead of
-	returning anything to test, exec() checks what has to be true before the
-	first one, and declared parameters read themselves out of
+	returning something to test, exec() checks what must be true before the
+	first action, and declared parameters read their own values out of
 	prg_params.json.
 */
 
@@ -36,8 +36,8 @@
 #include "program_params.hpp"
 #include "screen_capture.hpp"
 
-// Everything a program is allowed to touch. The three big ones are held by
-// reference, so the objects behind them must outlive any run.
+// Everything a program may touch. The first three are references, so the
+// objects behind them must live longer than any run.
 struct ProgramContext {
 	ImageLibrary&        images;
 	ImageDetector&       detector;
@@ -59,8 +59,8 @@ struct ProgramResult {
 	std::string description;
 };
 
-// How a program gives up. Thrown by the actions and turned back into a
-// ProgramResult by exec(), so it never leaves the program thread.
+// How a program gives up. The actions throw it and exec() turns it back
+// into a ProgramResult, so it never leaves the program thread.
 class ProgramError : public std::runtime_error {
 public:
 	ProgramError(ProgramExit exit, const std::string& why)
@@ -72,9 +72,9 @@ private:
 	ProgramExit m_exit;
 };
 
-// Declares one tunable of a program: its kind, its name, and what it is
-// without prg_params.json. The name is written out as the key as well, so
-// the two cannot come apart.
+// Declares one setting of a program: its kind, its name, and its value
+// without prg_params.json. The macro also writes the name out as the file
+// key, so the two cannot drift apart.
 #define PROG_PARAM(kind, NAME, fallback) kind NAME {*this, #NAME, fallback}
 
 class Program {
@@ -88,22 +88,22 @@ public:
 
 	// One line for the 'programs' listing.
 	virtual std::string purpose() const = 0;
-	// Every declared parameter with its value, the ones prg_params.json set
-	// marked with a star.
+	// Every declared parameter with its value. The ones prg_params.json set
+	// are marked with a star.
 	std::string settings_text() const;
-	// Takes whatever this program understands out of prg_params.json. A
-	// value that is there but unusable is an error: a parameter that
-	// silently fails to apply is worse than a refusal to start. One program
-	// built out of another overrides this to pass the file on as well.
+	// Reads what this program understands out of prg_params.json. A value
+	// that is there but cannot be used is an error, because a parameter that
+	// quietly fails to apply is worse than a refusal to start. A program
+	// built out of another one overrides this to pass the file on as well.
 	virtual bool configure(const ProgramParams& params, std::string& error);
 
-	// Does the job. Called on the program thread by ProgramRunner. Checks
-	// the capture is running and resolves every declared pattern before
+	// Does the job. ProgramRunner calls it on the program thread. It checks
+	// that capture is running and looks up every declared pattern before
 	// run() starts.
 	ProgramResult exec(ProgramContext& context);
 
 	// Asks a running exec() to give up at its next action. Virtual because a
-	// program built out of others has to pass this on to them.
+	// program built out of others must pass this on to them.
 	virtual void request_stop() noexcept { m_stop.store(true); }
 	bool stopping() const noexcept { return m_stop.load(); }
 
@@ -118,9 +118,10 @@ protected:
 		    Pattern  UNDOCK   {*this, "undock"};
 		    Patterns STATIONS {*this, {"station_route", "station_home_route"}};
 
-		Each registers itself as it is built and exec() turns every name into
-		a library index, so a misspelt image is one message before the first
-		action rather than a surprise halfway through a route.
+		Each one adds itself to the program as it is built, and exec() turns
+		every name into a library index. So a misspelt image name is one
+		message before the first action, not a surprise in the middle of a
+		route.
 	*/
 	class PatternDecl {
 	public:
@@ -133,8 +134,8 @@ protected:
 
 	private:
 		friend class Program;
-		// Fills in the index, or adds what the library does not have to
-		// missing.
+		// Fills in the index, or adds the name to missing when the library
+		// does not have it.
 		virtual void resolve(
 			ImageLibrary& images, std::vector<std::string>& missing) = 0;
 	};
@@ -182,20 +183,20 @@ protected:
 		    PROG_PARAM(Timeout,  DESTINATION_TIMEOUT,  10000);
 		    PROG_PARAM(Interval, WARP_RECHECK_INTERVAL, 2000);
 
-		The member name is also the key in prg_params.json and also what a
-		failure calls it, so the three cannot drift apart.
+		The member name is also the key in prg_params.json, and also the name
+		a failure prints, so the three cannot drift apart.
 
-		Which kind it is says what it costs to run:
+		The kind says what the number costs to run:
 
-		    Pause     time really spent, every time, whether or not anything
-		              was going to happen
+		    Pause     time really spent, every time, whether or not
+		              anything was going to happen
 		    Interval  the gap between two looks at the same thing
-		    Timeout   an upper bound, only ever paid when something is wrong
+		    Timeout   an upper limit, only ever paid when something is wrong
 		    Count     how many times to try something
 
-		The kind and the name have to agree - a Pause has to be called
-		something_PAUSE - and configure() refuses a program whose names say
-		something different from what its code does.
+		The kind and the name must agree: a Pause must be called
+		something_PAUSE. configure() refuses a program whose names say
+		something other than what its code does.
 	*/
 	class ParamDecl {
 	public:
@@ -214,8 +215,8 @@ protected:
 
 	private:
 		friend class Program;
-		// Takes this program's value out of the file, or keeps the built in
-		// one. False and error when what the file says cannot be used.
+		// Reads this program's value from the file, or keeps the built in
+		// one. Returns false and fills error when the file value is unusable.
 		virtual bool read(
 			const ProgramParams& params,
 			const std::string&   program,
@@ -328,39 +329,39 @@ protected:
 		int m_value;
 	};
 
-	// The numbers that are the same everywhere, read as
-	// common().CONFIRM_TIMEOUT so a value from eve_config.json never looks
+	// The numbers that are the same for every program. They are read as
+	// common().CONFIRM_TIMEOUT, so a value from eve_config.json never looks
 	// like one of this program's own.
 	const ProgramDefaults& common() const noexcept
 		{ return context().defaults; }
 
-	// Anything a program has to settle after the patterns are resolved and
-	// before the first action. Most have nothing to do here.
+	// Anything a program must set up after the patterns are looked up and
+	// before the first action. Most programs have nothing to do here.
 	virtual bool prepare(std::string& error);
 
 	// Does the job. The context is already in place.
 	virtual ProgramResult run() = 0;
 
-	// What the program is allowed to touch, for the run in flight. Only
-	// valid inside exec().
+	// What the program may touch during the current run. Valid only inside
+	// exec().
 	ProgramContext& context() const noexcept { return *m_context; }
 
 	/*
-		A stretch of time shared by more than one wait. Each of them takes
-		what is left rather than the whole of it, so two waits that belong to
-		the same thing cannot together outlast it.
+		A length of time shared by more than one wait. Each wait takes what
+		is left of it, not the whole of it, so two waits that belong to the
+		same job cannot together last longer than the job.
 
-		This is the whole of the difference between the two kinds of time in
-		this API, and the names keep them apart: a parameter called timeout
-		is an eb::Millis and starts from now, one called budget is a Budget
-		and started whenever it was made.
+		That is the only difference between the two kinds of time in this
+		API, and the names keep them apart. A parameter called timeout is an
+		eb::Millis and starts now. A parameter called budget is a Budget and
+		started when it was made.
 
-		A Budget converts to what is left of it, so it may be handed to any
-		action that wants a timeout. The conversion happens at the call,
-		which is what makes it safe: the action gets what remained at the
-		moment it was asked, not what remained when the budget was made.
-		vanish() takes the Budget itself, because it polls and has to watch
-		the budget run down across its own waiting.
+		A Budget converts to what is left of it, so it can be given to any
+		action that wants a timeout. The conversion happens at the call, and
+		that is what makes it safe: the action gets what was left at the
+		moment it was called, not what was left when the budget was made.
+		vanish() takes the Budget itself, because it looks again and again
+		and must watch the budget run down while it waits.
 	*/
 	class Budget {
 	public:
@@ -368,7 +369,7 @@ protected:
 			: m_total {total}, m_began {eb::Clock::now()} {}
 
 		eb::Millis total() const noexcept { return m_total; }
-		// Zero once it has run out, never negative.
+		// Zero when it has run out, never below zero.
 		eb::Millis left()  const;
 		operator eb::Millis() const { return left(); }
 
@@ -378,12 +379,12 @@ protected:
 	};
 
 	/*
-		Names the stretch of work in flight, so that every failure thrown
-		underneath it says where it happened:
+		Names the piece of work in progress, so that every failure thrown
+		below it says where it happened:
 
 		    Doing note {*this, hop_text(hop)};   // "hop 3: ..."
 
-		It lasts as long as the object does, and nests.
+		It lasts as long as the object lives, and such objects can nest.
 	*/
 	class Doing {
 	public:
@@ -396,7 +397,7 @@ protected:
 		Program& m_program;
 	};
 
-	// Where something was seen, and which pattern it turned out to be.
+	// Where something was seen, and which pattern it was.
 	struct Sighting {
 		cv::Point at;
 		size_t    image {0};
@@ -405,79 +406,80 @@ protected:
 	// ---- giving up ------------------------------------------------------
 	// Neither of these returns: both leave run() through exec().
 	[[noreturn]] void fail(const std::string& why) const;
-	// what reads on from "stopped while": "waiting for the gate to load".
+	// what follows "stopped while": "waiting for the gate to load".
 	[[noreturn]] void stopped_while(const std::string& what) const;
-	// The one ordinary way out, for symmetry with the two above.
+	// The normal way out, put here next to the other two.
 	static ProgramResult done(std::string description);
 
 	/*
 		---- actions --------------------------------------------------------
 
-		What a program is made of. Every one of them insists: if the game
-		does not do what it was asked, the program is over.
+		What a program is made of. Every action insists: if the game does not
+		do what it was asked, the program is over.
 
-		A failure names the pattern it was looking at, as eve_images.json
+		A failure names the pattern it was looking for, as eve_images.json
 		names it: "'undock' did not appear", "'station_route' or
-		'station_home_route' did not appear". Nothing is spelt out at the
-		call site for that, so nothing can drift out of step with the image
-		it describes. What the program was doing when it happened comes from
-		whatever Doing scopes are open - "hop 3: " - which is where that
-		belongs, being a property of the step rather than of the picture.
+		'station_home_route' did not appear". The call site writes none of
+		that, so the message cannot drift away from the image it describes.
+		What the program was doing at the time comes from the open Doing
+		scopes - "hop 3: " - because that belongs to the step, not to the
+		picture.
 
-		Several images mean "any of these will do": one search that looks at
-		the quick boxes of all of them before hunting any across the whole
-		frame, which is not what looking for each in turn would do.
+		Several images mean "any of these will do". That is one search which
+		looks at the quick boxes of all of them before it searches the whole
+		frame for any of them, and it is not the same as looking for each
+		one in turn.
 
-		pause() is the exception to all of it: it watches nothing, so it has
-		no pattern to name and says in words what it is waiting out.
+		pause() is the exception: it watches nothing, so it has no pattern
+		to name and says in words what it is waiting for.
 	*/
 
 	// Time spent on purpose, watching nothing. Only a Pause or an Interval
-	// will do: time a program spends doing nothing is the one thing it
-	// should never be able to do by accident. what is only ever heard when a
-	// stop arrives in the middle of it.
+	// is allowed here: time a program spends doing nothing is the one thing
+	// it must never do by accident. what is only ever printed when a stop
+	// arrives in the middle of the wait.
 	void pause(const Pause& duration, const std::string& what) const;
 	void pause(const Interval& duration, const std::string& what) const;
 
 	/**
-	 * Waits for one of the patterns to turn up, and gives up if none does.
-	 * Between looks it waits one frame, since nothing can have changed
-	 * until capture has taken another.
+	 * Waits for one of the patterns to appear, and gives up if none does.
+	 * Between two looks it waits one frame, because nothing can change
+	 * before capture takes the next one.
 	 *
 	 * @param images  the patterns to look for; any one of them answers.
 	 * @param timeout how long to keep looking. A Budget may be given
-	 *                instead and counts as what is left of it.
-	 * @return where it was seen, and which of the patterns it was.
+	 *                instead, and counts as what is left of it.
+	 * @return where it was seen, and which pattern it was.
 	 * @throws ProgramError FAILURE if none appeared, or if the search
 	 *         itself could not run; STOPPED if a stop arrived first.
 	 */
 	Sighting appear(
 		const eb::Images& images,
 		eb::Millis timeout,
-		Scope scope = Scope::BOX
+		eb::Scope scope = eb::Scope::BOX
 	) const;
 	/// One pattern, the common case.
 	/// @return the top left corner of the match, in capture frame pixels.
-	cv::Point appear(size_t image, eb::Millis timeout, Scope scope = Scope::BOX) const
+	cv::Point appear(size_t image, eb::Millis timeout, eb::Scope scope = eb::Scope::BOX) const
 		{ return appear(eb::Images {image}, timeout, scope).at; }
 
-	// Waits for something to go away again, looking once per recheck: this
-	// is for waits measured in minutes, where searching on repeat would keep
-	// a core busy for the whole of it.
+	// Waits for something to go away, looking once per recheck. This is for
+	// waits of several minutes, where searching again and again would keep a
+	// core busy for the whole time.
 	void vanish(
 		size_t          image,
 		const Budget&   budget,
 		const Interval& recheck,
-		Scope scope = Scope::BOX
+		eb::Scope scope = eb::Scope::BOX
 	) const;
 
 	/**
-	 * Looks once, for when not finding something is an answer rather than
-	 * a failure. Unlike appear() a pattern that is not there yet is
-	 * reported as not there rather than waited for.
+	 * Looks once, for when not finding something is an answer and not a
+	 * failure. Unlike appear(), a pattern that is not there yet is reported
+	 * as not there instead of being waited for.
 	 *
-	 * There is no timeout: one search takes as long as it takes, and
-	 * nothing about it can be given up on part way.
+	 * There is no timeout: one search takes as long as it takes, and it
+	 * cannot be given up half way.
 	 *
 	 * @param images the patterns to look for; any one of them answers.
 	 * @param seen   where it was seen and which pattern it was, left alone
@@ -489,10 +491,10 @@ protected:
 	bool visible(
 		const eb::Images& images,
 		Sighting& seen,
-		Scope scope = Scope::BOX
+		eb::Scope scope = eb::Scope::BOX
 	) const;
 	/// @param at where it was seen, left alone when it was not.
-	bool visible(size_t image, cv::Point& at, Scope scope = Scope::BOX) const
+	bool visible(size_t image, cv::Point& at, eb::Scope scope = eb::Scope::BOX) const
 	{
 		Sighting seen;
 		if (!visible(eb::Images {image}, seen, scope)) return false;
@@ -500,44 +502,42 @@ protected:
 		return true;
 	}
 	/// For when only the yes or no matters.
-	bool visible(size_t image, Scope scope = Scope::BOX) const
+	bool visible(size_t image, eb::Scope scope = eb::Scope::BOX) const
 	{
 		cv::Point anywhere;
 		return visible(image, anywhere, scope);
 	}
-	bool visible(const eb::Images& images, Scope scope = Scope::BOX) const
+	bool visible(const eb::Images& images, eb::Scope scope = eb::Scope::BOX) const
 	{
 		Sighting anywhere;
 		return visible(images, anywhere, scope);
 	}
 
 	/**
-	 * Finds a pattern, clicks the middle of it, and insists the game show
-	 * the click was taken: any one of confirm appearing is that proof.
+	 * Finds a pattern, clicks the middle of it, and makes the game show
+	 * that the click was taken: any one of confirm appearing is that proof.
 	 *
-	 * Where it is, is looked up here rather than passed in: a caller
-	 * holding a position found a moment ago is holding where the thing
-	 * was, and a panel that has scrolled since would have the click press
-	 * whatever moved into that spot.
+	 * The position is looked up here and not passed in. A caller that found
+	 * the pattern a moment ago holds where it was, and if the panel has
+	 * scrolled since, the click would press whatever moved into that place.
 	 *
 	 * @param image   the pattern to find and press.
-	 * @param src_to  how long the look for it may take, and nothing else.
-	 *                It belongs to the caller because only the caller
-	 *                knows what the click is part of: handed a Budget, a
-	 *                click that finishes a longer stretch of work takes
-	 *                what is left of that stretch rather than a fresh
-	 *                timeout of its own, so the stretch cannot outlast
-	 *                itself one action at a time.
-	 * @param wait    how long to leave the interface alone after the
-	 *                press, so the confirmation is not searched for in the
-	 *                frame the click was supposed to change.
-	 * @param confirm patterns any one of which proves the click was taken.
-	 *                Empty leaves a plain click.
-	 * @param conf_to how long to wait for that proof, per attempt.
-	 * @param retries how many further clicks to make when the proof does
-	 *                not come. ACTION_RETRIES, or any negative number,
-	 *                asks for what eve_config.json says - a default
-	 *                argument cannot read it, common() being a member.
+	 * @param src_to  how long the look for it may take, and nothing more.
+	 *                It belongs to the caller, because only the caller
+	 *                knows what the click is part of. Given a Budget, a
+	 *                click that ends a longer piece of work takes what is
+	 *                left of that work instead of a fresh timeout of its
+	 *                own, so the work cannot grow one action at a time.
+	 * @param wait    how long to leave the interface alone after the press,
+	 *                so the proof is not looked for in the frame that the
+	 *                click was supposed to change.
+	 * @param confirm patterns, any one of which proves the click was taken.
+	 *                Empty means a plain click.
+	 * @param conf_to how long to wait for that proof, for each attempt.
+	 * @param retries how many more clicks to make when the proof does not
+	 *                come. ACTION_RETRIES, or any negative number, asks for
+	 *                the value in eve_config.json. A default argument
+	 *                cannot read it, because common() is a member.
 	 * @throws ProgramError FAILURE if the pattern was never found, if the
 	 *         click could not be made, or if every allowed click went
 	 *         unconfirmed; STOPPED if a stop arrived first.
@@ -552,9 +552,9 @@ protected:
 		eb::Millis        conf_to,
 		int               retries = ACTION_RETRIES
 	) const;
-	/// The usual click: WAIT_CLICK to let the press settle and
-	/// CONFIRM_TIMEOUT to see the proof of it. Name those two only where
-	/// the click belongs to something with a budget of its own.
+	/// The usual click: WAIT_CLICK to let the press settle, and
+	/// CONFIRM_TIMEOUT to wait for the proof. Give those two by hand only
+	/// where the click belongs to a job with a budget of its own.
 	void click(
 		size_t image, eb::Millis src_to, const eb::Images& confirm,
 		int retries = ACTION_RETRIES
@@ -565,10 +565,10 @@ protected:
 			common().CONFIRM_TIMEOUT, retries
 		);
 	}
-	/// Nothing to confirm, so nothing to settle for either. A button
-	/// pressed and never checked is the usual reason a program wanders off
-	/// doing nothing, so leave the confirmation out only where there is
-	/// genuinely nothing to look for.
+	/// Nothing to confirm, so nothing to wait for either. A button pressed
+	/// and never checked is the usual reason a program keeps running and
+	/// does nothing, so leave the proof out only where there is really
+	/// nothing to look for.
 	void click(size_t image, eb::Millis src_to) const
 	{
 		click(
@@ -578,13 +578,13 @@ protected:
 	}
 
 	/**
-	 * Runs another program as a step of this one, on this program's
-	 * context. Anything but success ends this run too, carrying the step's
-	 * own account of what went wrong.
+	 * Runs another program as a step of this one, with this program's
+	 * context. Anything but success ends this run as well, and carries the
+	 * step's own words about what went wrong.
 	 *
-	 * @param step the program to run. Its stop flag is its own, so a
+	 * @param step the program to run. It has its own stop flag, so a
 	 *             program built this way passes request_stop() on to it.
-	 * @throws ProgramError whatever the step ended with, named so the
+	 * @throws ProgramError whatever the step ended with, named so that the
 	 *         message says which step it was.
 	 */
 	void sub_program(Program& step) const
@@ -601,35 +601,34 @@ protected:
 private:
 	friend class Doing;
 
-	// Whatever Doing scopes are open, ready to be put in front of a message:
-	// "hop 3: ".
+	// The open Doing scopes, ready to go in front of a message: "hop 3: ".
 	std::string note_text() const;
 
-	// How a message names what it was looking at, as eve_images.json names
-	// it: "'undock'", "'jump' or 'dock'".
+	// How a message names what was looked for, as eve_images.json names it:
+	// "'undock'", "'jump' or 'dock'".
 	std::string named(const eb::Images& images) const;
 
-	// What appear() is made of, and what a click waits on for its proof:
-	// looks until one of the patterns is there or the timeout runs out,
-	// reporting a miss rather than failing on one. What appear() adds is
-	// that a miss is the end of the program.
+	// What appear() is built from, and what a click waits on for its proof.
+	// It looks until one of the patterns is there or the timeout runs out,
+	// and reports a miss instead of failing on it. What appear() adds is
+	// that a miss ends the program.
 	bool watch(
 		const eb::Images& images,
 		eb::Millis        timeout,
 		Sighting&         seen,
-		Scope             scope
+		eb::Scope             scope
 	) const;
 
 	// Turns every declared pattern into a library index. Returns the names
-	// the library did not have, empty when all were found.
+	// the library did not have, and an empty string when all were found.
 	std::string resolve_patterns(ImageLibrary& images);
 
-	// Every declared parameter by name, for saying what the file could have
-	// meant.
+	// The names of all declared parameters, for saying what the file could
+	// have meant.
 	std::string param_list() const;
 
-	// Sleeping without a Pause to point at, for the actions that wait on
-	// their own account.
+	// Sleeping with no Pause to name, for the actions that wait by
+	// themselves.
 	void rest_or_stop(eb::Millis duration, const std::string& what) const;
 
 	std::string               m_name;
@@ -639,21 +638,21 @@ private:
 	std::vector<std::string>  m_notes;      // the open Doing scopes
 	ProgramContext*           m_context {nullptr};
 
-	// Every program has this one: the menu has room for a handful of entries
-	// and most programs are steps others are built out of, so a program is
-	// kept out of it until prg_params.json says otherwise. Declared after
-	// the list it registers itself with, which has to exist by then.
+	// Every program has this one. The menu has room for only a few entries,
+	// and most programs are steps of other programs, so a program stays out
+	// of the menu until prg_params.json says otherwise. Declared after the
+	// list it adds itself to, which must exist by then.
 	PROG_PARAM(Flag, SHOW_IN_MENU, false);
 };
 
-// Holds the known programs and runs one at a time: they all drive the same
-// game window, and two clicking at once would fight each other.
+// Holds the known programs and runs one at a time. They all drive the same
+// game window, so two of them clicking at once would fight each other.
 class ProgramRunner {
 public:
 	static constexpr size_t NOT_FOUND = static_cast<size_t>(-1);
 
-	// Called on the program thread the moment a run ends, so a finished job
-	// is reported without the console having to poll for it.
+	// Called on the program thread as soon as a run ends, so a finished job
+	// is reported without the console asking for it.
 	using FinishHandler =
 		std::function<void(const std::string&, const ProgramResult&)>;
 
@@ -664,8 +663,8 @@ public:
 
 	void add(std::unique_ptr<Program> program);
 	void on_finish(FinishHandler handler) { m_on_finish = std::move(handler); }
-	// Hands every registered program its parameters, stopping at the first
-	// one that rejects what it was given.
+	// Gives every registered program its parameters. Stops at the first
+	// program that refuses what it was given.
 	bool configure(const ProgramParams& params, std::string& error);
 
 	bool   empty() const noexcept { return m_programs.empty(); }
@@ -679,13 +678,14 @@ public:
 	std::string name_list() const;
 
 	bool running() const noexcept { return m_running.load(); }
-	// Name of the program in flight, empty when none is.
+	// Name of the running program, empty when none is running.
 	std::string current() const;
 
 	// Starts a program on its own thread. False when one is already running.
-	// start(), abort() and wait() are asked for from both the console and
-	// the pop-up menu, so they share a lock of their own; a run in flight
-	// never takes it, so joining underneath it cannot deadlock.
+	// start(), abort() and wait() are called from both the console and the
+	// pop-up menu, so they share a lock of their own. A running program
+	// never takes that lock, so joining the thread under it cannot
+	// deadlock.
 	bool start(
 		size_t program, const ProgramContext& context, std::string& error
 	);

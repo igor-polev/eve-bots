@@ -4,23 +4,23 @@
 
 	Mouse input - clicking a point of the captured window.
 
-	Frame coordinates are measured from the window's DWM extended frame, not
-	GetWindowRect, which also counts the invisible resize border, and not the
-	client area, which starts below the title bar. The offset is read afresh
-	on every click, so a window that has moved since the detection is still
-	clicked in the right place.
+	Frame coordinates are measured from the window's DWM extended frame. Not
+	from GetWindowRect, which also counts the invisible resize border, and
+	not from the client area, which starts below the title bar. The offset is
+	read again on every click, so a window that moved after the detection is
+	still clicked in the right place.
 
 	Clicks go through SendInput. Posting WM_LBUTTONDOWN/UP was tried and
-	removed: EVE draws its own interface and ignores posted mouse messages
-	entirely. Do not reintroduce it without testing against the client.
+	removed: EVE draws its own interface and ignores posted mouse messages.
+	Do not bring it back without testing against the client.
 
-	That leaves three things a click has to arrange for itself, none of them
-	optional: the game must hold the foreground, or WM_MOUSEACTIVATE eats the
-	click to activate it; nothing may lie over the point on screen, since the
-	click lands on whatever is on top there; and the cursor and the previous
+	So a click has to arrange three things itself, and none of them can be
+	left out. The game must be in front, or WM_MOUSEACTIVATE eats the click
+	to activate the window. Nothing may lie over the point on screen, because
+	the click lands on whatever is on top there. And the cursor and the old
 	focus have to be put back afterwards. click_at() does all three, and
-	waits for a gap in what the user is doing first - InputPriority says how
-	patiently.
+	first waits for a gap in the user's work; InputPriority says how long it
+	waits.
 */
 
 #pragma once
@@ -35,7 +35,7 @@
 #include "input_priority.hpp"
 
 // How long to leave the interface alone after a click. The game needs a
-// moment to react before the next captured frame is worth looking at.
+// moment to react before the next frame is worth looking at.
 constexpr eb::Millis UI_WAIT_DEFAULT {20};
 
 struct ClickResult {
@@ -47,11 +47,11 @@ struct ClickResult {
 };
 
 // Clicks one point of window, given in capture frame coordinates, then
-// sleeps wait so the game can react before the next frame is examined.
+// sleeps for wait so the game can react before the next frame is read.
 // Returns false and fills error when the point cannot be mapped onto the
-// desktop, the input is refused, or the desktop was never free enough within
-// the priority's timeout. A click runs to its end once begun: it takes a
-// quarter of a second and cannot be left half made.
+// desktop, when the input is refused, or when the desktop never became free
+// within the priority timeout. A click always runs to its end: it takes a
+// quarter of a second and cannot be left half done.
 bool click_at(
 	HWND                 window,
 	const cv::Point&     frame,

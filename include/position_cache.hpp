@@ -4,17 +4,17 @@
 
 	PositionCache - where patterns were last seen, kept across restarts.
 
-	Finding a pattern the first time means scanning the whole frame, which
-	costs seconds; every search afterwards looks at a small box around the
-	remembered position. This file carries that memory over between runs.
+	Finding a pattern the first time means searching the whole frame, which
+	costs seconds. Every search after that looks at a small box around the
+	remembered position. This file carries that memory from run to run.
 
-	A remembered position only means anything for the client it was taken
-	from, so each set is filed under the character name and the frame size
-	and used only when both match. Sets for other clients are left in the
-	file untouched, so switching back and forth costs nothing.
+	A remembered position means something only for the client it came from,
+	so each set is filed under the character name and the frame size, and is
+	used only when both match. Sets for other clients stay in the file
+	untouched, so switching between clients costs nothing.
 
-	Only the axes a pattern actually holds still along are written: the free
-	one would change with almost every detection and rewrite the file for
+	Only the axes a pattern stays in place along are written. A free axis
+	would change with almost every detection and rewrite the file for
 	nothing.
 */
 
@@ -33,10 +33,10 @@ class PositionCache {
 public:
 	static constexpr const wchar_t* FILE_NAME = L"eve_positions.json";
 
-	// Reads path, which need not exist: an absent cache is the normal state
-	// of a first run. False and error when the file is there but unreadable;
-	// the cache is then empty and written afresh, since it regenerates
-	// itself in one detection per pattern.
+	// Reads path. The file need not exist: on a first run there is none.
+	// Returns false and fills error when the file is there but cannot be
+	// read. The cache is then empty and is written again from the start,
+	// because one detection per pattern fills it back up.
 	bool load(const std::wstring& path, std::string& error);
 
 	const std::wstring& source_path() const noexcept { return m_path; }
@@ -46,11 +46,11 @@ public:
 		int  restored {0};      // positions handed back to the library
 	};
 
-	// Points the cache at one client: positions are filed under this
-	// character and frame size from now on, and whatever was filed under the
-	// same pair before is handed to the library. What the library holds from
-	// another client is forgotten first. Following the same client twice
-	// changes nothing - what the library holds is fresher than the file.
+	// Points the cache at one client. From now on positions are filed under
+	// this character and frame size, and whatever was filed under the same
+	// pair before is given to the library. Positions the library holds from
+	// another client are forgotten first. Following the same client twice
+	// changes nothing, because the library holds newer values than the file.
 	Follow follow(
 		ImageLibrary&      images,
 		const std::string& character,
@@ -58,24 +58,24 @@ public:
 		int                height
 	);
 
-	// Records where a pattern was just found, writing the file only when
-	// that changes something worth keeping: a pattern with no
-	// FIXED_DIRECTIONS is not kept, and one that moved along a free axis
-	// costs nothing. True when the file was written.
+	// Writes down where a pattern was just found. It saves the file only
+	// when something worth keeping has changed: a pattern with no
+	// FIXED_DIRECTIONS is not kept at all, and a move along a free axis
+	// changes nothing. True when the file was written.
 	bool store(const ImagePattern& pattern, const cv::Point& corner);
 
 	// What went wrong the last time the file was written, empty when nothing
-	// did. Writing happens on whichever thread searched, which cannot
-	// politely interrupt the console, so it is kept here for 'status'.
+	// did. The file is written by the thread that searched, and that thread
+	// cannot interrupt the console, so the error is kept here for 'status'.
 	std::string last_error() const;
 
-	// One line for 'status': which client is being followed and how much is
+	// One line for 'status': which client is followed, and how much is
 	// remembered for it.
 	std::string state_text() const;
 
 private:
-	// A remembered corner, either coordinate of which may be UNKNOWN
-	// because the pattern does not hold still along that axis.
+	// A remembered corner. Either coordinate may be UNKNOWN, because the
+	// pattern does not stay in place along that axis.
 	struct Position {
 		int x {ImageLibrary::UNKNOWN};
 		int y {ImageLibrary::UNKNOWN};
@@ -89,8 +89,8 @@ private:
 		std::string character;
 		int         width  {0};
 		int         height {0};
-		// by pattern name, not by position: the library may be edited
-		// between runs, and a name outlives a reordering
+		// by pattern name, not by index: the library may be edited between
+		// runs, and a name survives a change of order
 		std::map<std::string, Position> images;
 	};
 

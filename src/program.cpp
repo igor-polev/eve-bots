@@ -13,12 +13,12 @@
 
 namespace {
 
-// A program sleeping checks for a stop this often.
+// How often a sleeping program checks for a stop.
 constexpr eb::Millis WAIT_STEP {100};
 
-// Nothing anybody would write in prg_params.json, so asking for a value with
-// this as the fallback answers "was there a number there at all?" as well as
-// "what was it?".
+// Nobody would write this in prg_params.json. So asking for a value with
+// this as the fallback answers both "was there a number?" and "what was
+// it?".
 constexpr double NOT_A_NUMBER = -1e18;
 
 } // namespace
@@ -69,9 +69,9 @@ bool Program::Millis::read(
 	m_tuned = params.has(program, key());
 	if (!m_tuned) return true;
 
-	// The file says something about it, so anything that is not a number
-	// it can use is a refusal rather than a fall back to the built in
-	// value: that value is what the file was written to change.
+	// The file says something about this parameter, so a value it cannot
+	// use is a refusal, not a fall back to the built in value: that value
+	// is what the file was written to change.
 	const double value = params.number(program, key(), NOT_A_NUMBER);
 	if (NOT_A_NUMBER == value) {
 		error = std::string(key()) + " must be a number of milliseconds";
@@ -138,12 +138,12 @@ std::string Program::Count::text() const
 bool Program::configure(const ProgramParams& params, std::string& error)
 {
 	for (ParamDecl* param : m_params) {
-		// The name has to say what the number is, because that is all a call
-		// site shows of it: GATE_JUMP_PAUSE is time the program will really
-		// spend, DOCKING_TIMEOUT is time it hopes not to.
+		// The name must say what the number is, because the call site shows
+		// nothing else: GATE_JUMP_PAUSE is time the program really spends,
+		// DOCKING_TIMEOUT is time it hopes not to spend.
 		const std::string key    = param->key();
-		// A Flag says what it turns on rather than what it costs, so it is
-		// the one kind with no ending to check.
+		// A Flag says what it turns on, not what it costs, so it is the one
+		// kind with no ending to check.
 		const std::string wanted = param->suffix();
 		if (!wanted.empty()
 			&& (key.size() <= wanted.size()
@@ -156,9 +156,9 @@ bool Program::configure(const ProgramParams& params, std::string& error)
 		if (!param->read(params, m_name, error)) return false;
 	}
 
-	// A key nothing answers to is almost always a parameter that has been
-	// renamed or misspelt, and the file gives no sign of it: the program
-	// simply runs on its built in value. Better to say so and refuse.
+	// A key no parameter answers to is almost always a renamed or misspelt
+	// name, and the file gives no sign of it: the program just runs on its
+	// built in value. Better to say so and refuse to start.
 	for (const std::string& key : params.keys(m_name)) {
 		const auto known = [&key](const ParamDecl* param) {
 			return key == param->key();
@@ -188,7 +188,7 @@ std::string Program::settings_text() const
 
 	std::string text;
 	for (size_t i = 0; i < m_params.size(); ++i) {
-		// Three to a line, the way the listing indents them.
+		// Three to a line, the way the listing lays them out.
 		if (0 != i) text += (0 == i % 3) ? ",\n      " : ", ";
 		text += std::string(m_params[i]->key()) + " " + m_params[i]->text();
 		if (m_params[i]->tuned()) text += "*";
@@ -219,7 +219,7 @@ bool Program::prepare(std::string&)
 
 ProgramResult Program::exec(ProgramContext& context)
 {
-	// A previous run may have been aborted; this one starts clean.
+	// A previous run may have been aborted, so this one starts clean.
 	m_stop.store(false);
 	m_notes.clear();
 	m_context = &context;
@@ -228,8 +228,8 @@ ProgramResult Program::exec(ProgramContext& context)
 			return {ProgramExit::FAILURE,
 			        "capture is not running; use 'start' first"};
 		}
-		// Every pattern up front, so a missing one is reported before the
-		// ship is committed to anything.
+		// Every pattern first, so a missing one is reported before the ship
+		// does anything.
 		const std::string missing = resolve_patterns(context.images);
 		if (!missing.empty()) return {ProgramExit::FAILURE, missing};
 
@@ -239,9 +239,9 @@ ProgramResult Program::exec(ProgramContext& context)
 		return run();
 	}
 	catch (const ProgramError& e) {
-		// The ordinary way a run ends short: an action the game did not
-		// answer, or a stop that was asked for. The message was written
-		// where it happened and needs nothing added to it.
+		// The normal way a run ends early: an action the game did not
+		// answer, or a stop that somebody asked for. The message was
+		// written where it happened and needs nothing added.
 		return ProgramResult {e.exit(), e.what()};
 	}
 	catch (const std::exception& e) {
@@ -300,8 +300,8 @@ ProgramResult Program::done(std::string description)
 
 void Program::rest_or_stop(eb::Millis duration, const std::string& what) const
 {
-	// In steps rather than in one sleep, so a stop asked for in the middle
-	// of a long pause is noticed while it is still worth noticing.
+	// In small steps, not in one long sleep, so that a stop asked for in the
+	// middle of a long pause is seen while it still matters.
 	for (eb::Millis left = duration;
 	     left > eb::Millis::zero();
 	     left -= WAIT_STEP)
@@ -327,7 +327,7 @@ std::string Program::named(const eb::Images& images) const
 	return context().images.names_text(images);
 }
 
-bool Program::visible(const eb::Images& images, Sighting& seen, Scope scope) const
+bool Program::visible(const eb::Images& images, Sighting& seen, eb::Scope scope) const
 {
 	if (stopping()) stopped_while("looking for " + named(images));
 
@@ -346,16 +346,16 @@ bool Program::watch(
 	const eb::Images& images,
 	eb::Millis        timeout,
 	Sighting&         seen,
-	Scope             scope) const
+	eb::Scope             scope) const
 {
 	const eb::TimePoint deadline = eb::Clock::now() + timeout;
 	while (true) {
 		if (visible(images, seen, scope)) return true;
 		if (eb::Clock::now() >= deadline) return false;
 
-		// One frame's worth, because nothing on screen can have changed
-		// until capture has taken another: searching the same frame again
-		// would hand back the same answer out of the detector's memory.
+		// One frame, because nothing on screen can change before capture
+		// takes the next one. Searching the same frame again would give
+		// back the same answer out of the detector's memory.
 		rest_or_stop(
 			context().capture.frame_life(), named(images) + " to appear"
 		);
@@ -363,7 +363,7 @@ bool Program::watch(
 }
 
 Program::Sighting Program::appear(
-	const eb::Images& images, eb::Millis timeout, Scope scope) const
+	const eb::Images& images, eb::Millis timeout, eb::Scope scope) const
 {
 	Sighting seen;
 	if (!watch(images, timeout, seen, scope))
@@ -375,7 +375,7 @@ void Program::vanish(
 	size_t          image,
 	const Budget&   budget,
 	const Interval& recheck,
-	Scope           scope) const
+	eb::Scope           scope) const
 {
 	const std::string what = named(eb::Images {image});
 	while (true) {
@@ -395,9 +395,9 @@ void Program::click(
 	eb::Millis        conf_to,
 	int               retries) const
 {
-	// Where it is now, which is not always where whoever asked for the click
-	// last saw it. Failing to find it here is the same failure as failing to
-	// find it anywhere else, so appear() reports it.
+	// Where it is now, which is not always where the caller last saw it. Not
+	// finding it here is the same failure as not finding it anywhere else,
+	// so appear() reports it.
 	const cv::Point corner = appear(image, src_to);
 
 	const ImagePattern& pattern = context().images(image);
@@ -405,8 +405,8 @@ void Program::click(
 		corner + cv::Point {pattern.width() / 2, pattern.height() / 2};
 
 	const std::string what = named(eb::Images {image});
-	// The first click, plus however many further ones were allowed. A
-	// negative count asks for what eve_config.json says.
+	// The first click, plus as many more as are allowed. A negative count
+	// asks for the value in eve_config.json.
 	const int attempts =
 		1 + (retries < 0 ? common().ACTION_RETRIES : retries);
 	for (int attempt = 0; attempt < attempts; ++attempt) {
@@ -418,18 +418,18 @@ void Program::click(
 				context().capture.target(), target, wait,
 				context().priority, made, trouble))
 		{
-			// A desktop busy with somebody else has already been waited out
-			// in there, so what is left is the window being gone or the
-			// input refused - which another attempt would meet in exactly
-			// the same state. This is not what the retries are for.
+			// A desktop busy with somebody else was already waited out in
+			// there. What is left is a window that is gone, or input that
+			// was refused, and another attempt would find the same state.
+			// The retries are not for this.
 			fail("cannot click " + what + ": " + trouble);
 		}
-		// Nothing to wait for: the click was made, and that was all that was
-		// asked of it.
+		// Nothing to wait for: the click was made, and that was all it was
+		// asked to do.
 		if (confirm.empty()) return;
 
 		Sighting seen;
-		if (watch(confirm, conf_to, seen, Scope::BOX)) return;
+		if (watch(confirm, conf_to, seen, eb::Scope::BOX)) return;
 	}
 	fail(what + " did not take: " + named(confirm) + " did not follow");
 }
@@ -494,8 +494,8 @@ bool ProgramRunner::start(
 		error = "'" + current() + "' is already running; abort it first";
 		return false;
 	}
-	// The previous run has ended - m_running said so - but nobody has
-	// joined its thread yet.
+	// The previous run has ended, because m_running says so, but nobody
+	// has joined its thread yet.
 	if (m_thread.joinable()) m_thread.join();
 
 	Program& job = *m_programs[program];
@@ -503,11 +503,11 @@ bool ProgramRunner::start(
 	m_running.store(true);
 	try {
 		m_thread = std::thread {[this, &job, context] {
-			// A search pulls a frame, and capture is WinRT, so this thread
-			// needs an apartment of its own.
+			// A search asks capture for a frame, and capture is WinRT, so
+			// this thread needs an apartment of its own.
 			winrt::init_apartment(winrt::apartment_type::multi_threaded);
-			// context holds three references and is copied into the thread,
-			// so it stays valid as long as the objects behind it do.
+			// context holds references and is copied into the thread, so it
+			// stays valid as long as the objects behind it live.
 			ProgramContext local = context;
 			const ProgramResult result = job.exec(local);
 			set_current(std::string {});
@@ -528,9 +528,9 @@ bool ProgramRunner::start(
 void ProgramRunner::abort()
 {
 	std::lock_guard<std::mutex> lock {m_control_mutex};
-	// Every program, not just the running one: the runner does not track
-	// which is in flight, and exec() clears the flag as a run begins, so a
-	// flag left raised here cannot affect a later start().
+	// Every program, not only the running one. The runner does not track
+	// which one is running, and exec() clears the flag when a run starts, so
+	// a flag left raised here cannot affect a later start().
 	for (const std::unique_ptr<Program>& program : m_programs)
 		program->request_stop();
 }

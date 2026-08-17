@@ -129,7 +129,7 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		autostart       = read_flag(settings, KEY_AUTOSTART);
 	}
 	catch (const json::out_of_range&) {
-		// at() names the missing key in its message, but not helpfully
+		// at() names the missing key in its message, but not clearly
 		error = "missing setting in " + to_utf8(path)
 		      + "; required keys are "
 		      + KEY_WINDOW_CLASS + ", "
@@ -151,7 +151,7 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		return false;
 	}
 
-	// A click that keeps looking forever is a program that never reports a
+	// A click that keeps looking for ever is a program that never reports a
 	// failure.
 	if (confirm_timeout < 1) {
 		error = std::string(KEY_CONFIRM_TIMEOUT)
@@ -159,9 +159,9 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		      + std::to_string(confirm_timeout) + ")";
 		return false;
 	}
-	// No wait at all is meaningful - it says this client keeps up - so only
-	// the upper end is guarded. Every confirmed click a program makes pays
-	// this, so a long one is not wrong, only slow.
+	// No wait at all has a meaning: it says this client keeps up. So only
+	// the upper limit is checked. Every confirmed click pays this wait, so a
+	// long one is not wrong, only slow.
 	if (wait_click < 0 || wait_click > MAX_WAIT_CLICK) {
 		error = std::string(KEY_WAIT_CLICK)
 		      + " is milliseconds and must be between 0 and "
@@ -176,8 +176,8 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		return false;
 	}
 
-	// Zero idle is meaningful - it is the bot-first mode - so only the
-	// upper end needs guarding here.
+	// Zero idle time has a meaning: it is the bot-first mode. So only the
+	// upper limit is checked here.
 	if (user_idle < 0 || user_idle > MAX_USER_PRIORITY_IDLE) {
 		error = std::string(KEY_USER_IDLE)
 		      + " is milliseconds and must be between 0 and "
@@ -192,9 +192,9 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		      + " (got " + std::to_string(user_timeout) + ")";
 		return false;
 	}
-	// A timeout shorter than the quiet it is waiting for can never be
-	// satisfied: every click would wait the whole timeout and then go
-	// ahead anyway, which is the bot-first mode taken the slow way round.
+	// A timeout shorter than the quiet time it waits for can never be
+	// reached. Every click would wait the whole timeout and then go ahead
+	// anyway, which is the bot-first mode by a slow road.
 	if (user_idle > 0 && user_timeout < user_idle) {
 		error = std::string(KEY_USER_TIMEOUT) + " is shorter than "
 		      + KEY_USER_IDLE + ", so the wait for a quiet moment could "
@@ -202,9 +202,9 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		return false;
 	}
 
-	// The one setting that may be left out, since the menu came later than
-	// the file did. Spelt out rather than a key code, so it can be changed
-	// by whoever has to press it.
+	// The one setting that may be left out, because the menu came after the
+	// file did. It is written as text and not as a key code, so the person
+	// who presses it can change it.
 	std::string spelling {MENU_HOTKEY_DEFAULT};
 	const auto typed = settings.find(KEY_MENU_HOTKEY);
 	if (settings.end() != typed) {
@@ -223,7 +223,7 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		return false;
 	}
 
-	// Without either criterion no window could ever match.
+	// With neither of the two rules, no window could ever match.
 	if (eve_window.class_name.empty() && eve_window.title_prefix.empty()) {
 		error = std::string("both ") + KEY_WINDOW_CLASS + " and "
 		      + KEY_TITLE_PREFIX + " are empty in " + to_utf8(path);
@@ -255,8 +255,8 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 	m_defaults.ACTION_RETRIES  = static_cast<int>(action_retries);
 	m_priority.USER_PRIORITY_IDLE    = eb::Millis {user_idle};
 	m_priority.USER_PRIORITY_TIMEOUT = eb::Millis {user_timeout};
-	// a relative image folder is meant relative to the settings file,
-	// not to whatever directory the app happens to be started from
+	// a relative image folder is relative to the settings file, not to the
+	// directory the app was started from
 	m_image_dir          = join_path(directory_of(path), image_dir);
 	m_source             = path;
 	return true;

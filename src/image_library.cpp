@@ -33,8 +33,8 @@ constexpr const char* KEY_MARGINE_X = "SEARCH_MARGINE_X";
 constexpr const char* KEY_MARGINE_Y = "SEARCH_MARGINE_Y";
 constexpr const char* KEY_SIMILAR   = "SIMILAR";
 
-// Reads one optional search margin. An absent key leaves the fraction as
-// it was, which is how ImageDetector later spots the ones it must fill in.
+// Reads one optional search margin. A missing key leaves the fraction as it
+// was, and that is how ImageDetector later finds the ones it must fill in.
 bool read_margine(
 	const json&        entry,
 	const char*        key,
@@ -59,7 +59,7 @@ bool read_margine(
 }
 
 // Turns the FIXED_DIRECTIONS text into a bit set. Order and case do not
-// matter; anything else is rejected by the caller.
+// matter. Anything else is refused by the caller.
 bool parse_fixed_directions(const std::string& text, unsigned& directions)
 {
 	directions = FIXED_NONE;
@@ -74,8 +74,8 @@ bool parse_fixed_directions(const std::string& text, unsigned& directions)
 }
 
 // Reads a whole file into memory. OpenCV's imread takes a narrow path and
-// mangles anything outside the ANSI code page, so decoding from a buffer
-// is the only reliable way to open a file under a Unicode path.
+// breaks anything outside the ANSI code page, so decoding from a buffer is
+// the only safe way to open a file under a Unicode path.
 bool read_file_bytes(
 	const std::wstring& path, std::vector<uchar>& bytes, std::string& error)
 {
@@ -100,14 +100,14 @@ bool read_file_bytes(
 
 // Splits a decoded PNG into a BGR template and, when the image is not fully
 // opaque, an alpha mask. Both come out as CV_32FC3 with values 0..1, which
-// is what matchTemplate wants against a float frame.
+// is what matchTemplate needs against a float frame.
 bool prepare_pattern(const cv::Mat& raw, ImagePattern& pattern, std::string& error)
 {
 	if (raw.empty()) {
 		error = "image holds no pixels";
 		return false;
 	}
-	// 16 bit PNGs are rare but legal, and would come out 256x too bright
+	// 16 bit PNGs are rare but allowed, and would come out 256 times too bright
 	const bool   deep  = CV_16U == raw.depth();
 	const double scale = deep ? 1.0 / 65535.0 : 1.0 / 255.0;
 	const double solid = deep ? 65535.0 : 255.0;
@@ -148,8 +148,8 @@ bool prepare_pattern(const cv::Mat& raw, ImagePattern& pattern, std::string& err
 		error = "image is fully transparent, nothing left to match";
 		return false;
 	}
-	// A channel that is opaque everywhere carries no information; leaving
-	// the mask empty then lets matchTemplate take its faster path.
+	// A channel that is opaque everywhere says nothing. Leaving the mask
+	// empty then lets matchTemplate use its faster path.
 	if (min_alpha >= solid) return true;
 
 	cv::Mat weights;
@@ -207,16 +207,16 @@ bool ImageLibrary::load_file(
 
 	std::vector<ImagePattern>     patterns;
 	std::map<std::string, size_t> index;
-	// SIMILAR entries as written, one list per pattern, in step with
-	// patterns; turned into positions once every name is known.
+	// SIMILAR entries as written, one list per pattern, in the same order
+	// as patterns. They become indexes once every name is known.
 	std::vector<std::vector<std::string>> named;
 	m_warnings.clear();
 	patterns.reserve(images->size());
 
 	for (size_t i = 0; i < images->size(); ++i) {
 		const json& entry = (*images)[i];
-		// entries are reported by position as well as by name, because a
-		// broken entry may be the one whose name failed to parse
+		// entries are reported by number as well as by name, because a
+		// broken entry may be the one whose name could not be read
 		const std::string where =
 			std::string(KEY_IMAGES) + "[" + std::to_string(i) + "] in "
 			+ to_utf8(path);
@@ -301,8 +301,8 @@ bool ImageLibrary::load_file(
 			return false;
 		}
 
-		// Kept as names for now: a pattern may name one that has not been
-		// read yet, so they can only become positions once all are in.
+		// Kept as names for now. A pattern may name another one that has
+		// not been read yet, so names become indexes only when all are in.
 		std::vector<std::string> similar;
 		const auto listed = entry.find(KEY_SIMILAR);
 		if (listed != entry.end()) {
@@ -377,9 +377,9 @@ bool ImageLibrary::link_similar(
 		ImagePattern& pattern = patterns[at];
 
 		for (const std::string& other : named[at]) {
-			// A name that is not in the library can only be a typo, and
-			// letting it through would quietly drop the very protection
-			// it was written to ask for.
+			// A name that is not in the library can only be a typo. Letting
+			// it through would quietly drop the very protection it asks
+			// for.
 			const auto found = index.find(other);
 			if (index.end() == found) {
 				error = "image '" + pattern.name + "' in " + to_utf8(path)
@@ -409,8 +409,8 @@ bool ImageLibrary::link_similar(
 		}
 	}
 
-	// Similarity runs both ways whether or not the file says so twice, so
-	// naming it on either pattern is enough.
+	// Similarity works both ways, whether or not the file says so twice, so
+	// naming it on one of the two patterns is enough.
 	for (size_t at = 0; at < patterns.size(); ++at) {
 		for (const size_t twin : patterns[at].similar) {
 			eb::Images& back = patterns[twin].similar;
@@ -419,8 +419,8 @@ bool ImageLibrary::link_similar(
 		}
 	}
 
-	// A pattern only shares a search window with something near its own
-	// size, so a wild mismatch is more likely a mistake than a lookalike.
+	// A pattern shares a search window only with something near its own size,
+	// so a big difference is more likely a mistake than a lookalike.
 	for (const ImagePattern& pattern : patterns) {
 		for (const size_t twin : pattern.similar) {
 			const ImagePattern& other = patterns[twin];

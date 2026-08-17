@@ -29,7 +29,7 @@ bool starts_with(const std::wstring& text, const std::wstring& prefix)
 		&& 0 == text.compare(0, prefix.size(), prefix);
 }
 
-// UWP/shell windows stay in the enumeration as invisible "ghosts".
+// UWP and shell windows stay in the list as invisible "ghosts".
 bool is_cloaked(HWND hwnd)
 {
 	int cloaked {0};
@@ -46,7 +46,7 @@ BOOL CALLBACK enum_proc(HWND hwnd, LPARAM param)
 	if (!IsWindowVisible(hwnd))  return TRUE;
 	if (is_cloaked(hwnd))        return TRUE;
 
-	// skip tool windows - palettes, tooltips and the like
+	// skip tool windows: palettes, tooltips and the like
 	if (GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW)
 		return TRUE;
 
@@ -79,10 +79,10 @@ BOOL CALLBACK enum_proc(HWND hwnd, LPARAM param)
 
 bool is_eve_window(const WindowInfo& info, const EveWindowMatch& match)
 {
-	// Every criterion that was given has to hold. Either one on its own
-	// catches something else: the class is shared with the launcher, and
-	// the title is shared with anything that happens to be showing the
-	// word EVE - a browser reading about the game, most easily.
+	// Every rule that was given must match. Each one alone catches
+	// something else: the launcher shares the class, and the title is
+	// shared with anything showing the word EVE, such as a browser open
+	// on a page about the game.
 	if (!match.class_name.empty()
 		&& to_lower(info.class_name) != to_lower(match.class_name))
 		return false;
@@ -96,8 +96,8 @@ std::wstring eve_character_name(
 	const std::wstring& title, const std::wstring& prefix)
 {
 	std::wstring name {title};
-	// The same case insensitive test is_eve_window() matches the prefix by,
-	// so a title accepted there is stripped here.
+	// The same test, ignoring case, that is_eve_window() uses on the prefix,
+	// so a title accepted there is cut here.
 	if (!prefix.empty() && starts_with(to_lower(name), to_lower(prefix)))
 		name.erase(0, prefix.size());
 

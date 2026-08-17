@@ -17,7 +17,7 @@ using Millis    = std::chrono::milliseconds;
 using Clock     = std::chrono::steady_clock;
 using TimePoint = Clock::time_point;
 
-// Patterns by their position in the image library. Several of them always
+// Patterns by their index in the image library. Several of them always
 // mean "any of these will do".
 using Images = std::vector<size_t>;
 

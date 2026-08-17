@@ -17,9 +17,9 @@ struct Frame {
 	std::vector<uint8_t> pixels;
 	uint32_t width  {0};
 	uint32_t height {0};
-	// When these pixels were captured. Doubles as the frame's identity: two
-	// searches handed the same reading are looking at the very same pixels,
-	// so they cannot honestly come to different answers.
+	// When these pixels were captured. It is also the identity of the frame:
+	// two searches given the same value look at the very same pixels, so they
+	// cannot give different answers.
 	eb::TimePoint taken {};
 
 	bool empty() const noexcept {

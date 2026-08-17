@@ -4,13 +4,13 @@
 
 	ScreenCapture - Windows Graphics Capture of a single window.
 
-	Frames are taken on request rather than on a timer: frame() hands back
-	the frame it holds while that one is younger than frame_life(), and only
-	then goes and captures a new one.
+	Frames are taken on request, not on a timer. frame() hands back the frame
+	it holds while that frame is younger than frame_life(). Only after that
+	does it capture a new one.
 
-	Graphics Capture itself cannot be throttled - the session keeps filling
-	the frame pool at the display rate - but nothing is copied back to the
-	CPU until somebody asks for a frame.
+	Graphics Capture itself cannot be slowed down: the session keeps filling
+	the frame pool at the display rate. But nothing is copied back to the CPU
+	until somebody asks for a frame.
 */
 
 #pragma once
@@ -38,10 +38,10 @@ public:
 	ScreenCapture(const ScreenCapture&)            = delete;
 	ScreenCapture& operator=(const ScreenCapture&) = delete;
 
-	// True if this build of Windows supports Graphics Capture.
+	// True when this build of Windows supports Graphics Capture.
 	static bool supported();
 
-	// Begins capturing hwnd. On failure returns false and fills error.
+	// Starts capturing hwnd. Returns false and fills error on failure.
 	bool start(HWND hwnd, std::string& error);
 	void stop();
 
@@ -50,21 +50,21 @@ public:
 	unsigned frame_rate() const noexcept { return m_frame_rate; }
 	// frames copied back to the CPU
 	uint64_t frame_count()   const noexcept { return m_frame_count.load(); }
-	// frames Windows delivered, i.e. how often the window redrew
+	// frames Windows delivered, that is, how often the window redrew
 	uint64_t arrived_count() const noexcept { return m_arrived_count.load(); }
 
-	// How long a captured frame stands as the current one.
+	// How long a captured frame counts as the current one.
 	eb::Millis frame_life() const noexcept;
 
-	// Puts the current frame into `into`, capturing a new one first when the
-	// held one has outlived frame_life(). True when `into` was replaced;
-	// false means it already held the current frame and was left alone,
-	// which is what spares the copy of every pixel. `into` is left empty
-	// while nothing has been captured at all.
+	// Puts the current frame into `into`. Captures a new one first when the
+	// frame in hand is older than frame_life(). Returns true when `into` was
+	// replaced. False means `into` already held the current frame and was
+	// left alone, which saves copying every pixel. `into` stays empty while
+	// nothing has been captured at all.
 	bool frame(Frame& into);
 
 private:
-	// Two buffers is enough: only the newest frame is ever consumed.
+	// Two buffers are enough: only the newest frame is ever used.
 	static constexpr int FRAME_POOL_BUFFERS = 2;
 
 	static constexpr winrt::Windows::Graphics::DirectX::DirectXPixelFormat
@@ -72,8 +72,8 @@ private:
 			winrt::Windows::Graphics::DirectX::DirectXPixelFormat::
 				B8G8R8A8UIntNormalized;
 
-	// Upper bound on the wait for a frame taken after the request. A window
-	// that is not redrawing produces none at all, so timing out is normal.
+	// Longest wait for a frame taken after the request. A window that does
+	// not redraw sends no frames at all, so a timeout here is normal.
 	static constexpr eb::Millis FRAME_WAIT {250};
 
 	void on_frame_arrived(
@@ -81,8 +81,9 @@ private:
 		const winrt::Windows::Foundation::IInspectable& args
 	);
 
-	// Discards what queued up while nobody was asking, waits for a frame
-	// taken since, and copies it into m_frame. Caller holds m_mutex.
+	// Drops the frames that queued up while nobody was asking, waits for a
+	// frame taken after that, and copies it into m_frame. Caller holds
+	// m_mutex.
 	bool capture_frame();
 	// Copies a captured texture into m_frame. Caller holds m_mutex.
 	void store_frame(ID3D11Texture2D* texture, uint32_t width, uint32_t height);
@@ -96,10 +97,10 @@ private:
 	std::atomic<uint64_t> m_frame_count   {0};
 	std::atomic<uint64_t> m_arrived_count {0};
 
-	// serialises pulls, and guards the frame, the D3D device and the pool
+	// one request at a time, and guards the frame, the D3D device and the pool
 	std::mutex m_mutex;
 
-	// signals that the pool holds a frame taken since the request
+	// tells the waiting request that the pool has a new frame
 	std::mutex              m_signal_mutex;
 	std::condition_variable m_signal;
 	bool                    m_frame_ready {false};
@@ -111,9 +112,9 @@ private:
 	uint32_t m_staging_height {0};
 
 	Frame m_frame;
-	// when the pool was last asked, which is not when m_frame was taken: a
-	// window that has not redrawn leaves the frame it was, and its pixels
-	// stay the current ones
+	// when the pool was last asked, which is not when m_frame was taken. A
+	// window that did not redraw keeps the same frame, and its pixels are
+	// still the current ones
 	eb::TimePoint m_checked {};
 
 	winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice m_device {nullptr};

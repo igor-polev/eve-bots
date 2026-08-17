@@ -46,16 +46,16 @@ bool ScreenCapture::frame(Frame& into)
 		&& (m_frame.empty() || eb::since(m_checked) >= frame_life()))
 	{
 		try {
-			// Nothing newly delivered means the window has not redrawn, so
-			// what is held is still what is on screen. Only the moment of
-			// asking moves on, which is why it is kept apart from the frame's
-			// own timestamp: those pixels are the same pixels, and everything
-			// already worked out about them still holds.
+			// No new frame means the window did not redraw, so the frame
+			// in hand is still what is on screen. Only the time of asking
+			// moves on. That time is kept apart from the frame's own
+			// timestamp, because the pixels are the same pixels and
+			// everything already worked out about them still holds.
 			capture_frame();
 		}
 		catch (...) {
-			// A frame that cannot be decoded is not fatal: the caller gets
-			// whatever was captured last.
+			// A frame that cannot be decoded is not fatal. The caller gets
+			// the frame captured last.
 		}
 		m_checked = eb::Clock::now();
 	}
@@ -80,7 +80,7 @@ bool ScreenCapture::start(HWND hwnd, std::string& error)
 	}
 
 	try {
-		// D3D11 device - BGRA support is required by the capture API
+		// D3D11 device. The capture API needs BGRA support.
 		winrt::com_ptr<ID3D11Device>        device;
 		winrt::com_ptr<ID3D11DeviceContext> context;
 		winrt::check_hresult(D3D11CreateDevice(
@@ -160,7 +160,7 @@ bool ScreenCapture::start(HWND hwnd, std::string& error)
 
 void ScreenCapture::stop()
 {
-	// before the lock, so a pull waiting for a frame gives it up at once
+	// before the lock, so a request waiting for a frame gives up at once
 	m_running.store(false);
 	m_signal.notify_all();
 
@@ -190,8 +190,8 @@ void ScreenCapture::on_frame_arrived(
 	const Direct3D11CaptureFramePool&,
 	const winrt::Windows::Foundation::IInspectable&)
 {
-	// Deliberately does no work: it only records that a frame is waiting,
-	// and whoever asked for one decides whether to spend time on it.
+	// Does no work on purpose. It only notes that a frame is waiting, and
+	// whoever asked for a frame decides whether to spend time on it.
 	m_arrived_count.fetch_add(1);
 	{
 		std::lock_guard<std::mutex> lock {m_signal_mutex};
@@ -204,8 +204,8 @@ bool ScreenCapture::capture_frame()
 {
 	if (!m_pool) return false;
 
-	// Frames that queued while nobody was asking show the window as it was;
-	// each of them returns its buffer to the pool as it goes out of scope.
+	// Frames that queued up while nobody was asking show the window as it
+	// was. Each returns its buffer to the pool when it goes out of scope.
 	while (m_pool.TryGetNextFrame()) {}
 	{
 		std::unique_lock<std::mutex> lock {m_signal_mutex};
@@ -214,8 +214,8 @@ bool ScreenCapture::capture_frame()
 			return m_frame_ready || !m_running.load();
 		});
 	}
-	// Asked for regardless of how the wait ended: a frame may have been
-	// delivered in the gap between discarding and clearing the flag.
+	// Asked for however the wait ended: a frame may have arrived between
+	// dropping the old ones and clearing the flag.
 	auto frame = m_pool.TryGetNextFrame();
 	if (!frame) return false;
 
@@ -224,8 +224,8 @@ bool ScreenCapture::capture_frame()
 
 	winrt::com_ptr<ID3D11Texture2D> texture;
 	{
-		// interop interface lives in the ABI namespace, not the projected
-		// winrt one pulled in by the using-directives above
+		// the interop interface is in the ABI namespace, not in the
+		// projected winrt one that the using-directives above bring in
 		auto access = frame.Surface().as<
 			::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
 		winrt::check_hresult(access->GetInterface(
@@ -236,7 +236,7 @@ bool ScreenCapture::capture_frame()
 	D3D11_TEXTURE2D_DESC desc {};
 	texture->GetDesc(&desc);
 
-	// The pool texture can be larger than the window content; crop.
+	// The pool texture can be larger than the window content, so crop it.
 	const uint32_t width  = (std::min)(
 		static_cast<uint32_t>(content.Width),  desc.Width);
 	const uint32_t height = (std::min)(
@@ -246,7 +246,7 @@ bool ScreenCapture::capture_frame()
 	store_frame(texture.get(), width, height);
 	m_frame_count.fetch_add(1);
 
-	// Track window resizes so the pool keeps matching the window.
+	// Follow window resizes, so the pool keeps matching the window.
 	if (content.Width  != m_item.Size().Width ||
 		content.Height != m_item.Size().Height)
 	{
@@ -258,7 +258,7 @@ bool ScreenCapture::capture_frame()
 void ScreenCapture::store_frame(
 	ID3D11Texture2D* texture, uint32_t width, uint32_t height)
 {
-	// staging texture: a GPU texture is not CPU readable
+	// staging texture, because the CPU cannot read a GPU texture
 	if (!m_staging || m_staging_width != width || m_staging_height != height) {
 		D3D11_TEXTURE2D_DESC staging_desc {};
 		staging_desc.Width            = width;

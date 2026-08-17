@@ -24,9 +24,9 @@
 #include "common_defs.hpp"
 
 // Axes along which a pattern normally keeps its place. Most of the EVE user
-// interface is pinned to a panel, so once an element has been found it turns
-// up at the same coordinates again - which lets the detector look at a small
-// box instead of the whole frame.
+// interface is fixed to a panel, so once an element has been found it appears
+// at the same coordinates again. That lets the detector search a small box
+// instead of the whole frame.
 enum FixedDirections : unsigned {
 	FIXED_NONE = 0,
 	FIXED_X    = 1,
@@ -38,14 +38,14 @@ enum FixedDirections : unsigned {
 std::string fixed_directions_text(unsigned directions);
 
 struct ImagePattern {
-	// A search margin eve_images.json did not name. Negative, so it can
-	// never be mistaken for a fraction somebody actually asked for.
+	// A search margin that eve_images.json did not give. Negative, so it can
+	// never be taken for a fraction somebody asked for.
 	static constexpr double MARGINE_UNSET = -1.0;
 	static bool margine_given(double fraction) noexcept
 		{ return fraction >= 0.0; }
 
-	// Patterns whose sizes differ by more than this are unlikely to be
-	// the lookalikes somebody meant to declare, and get a warning.
+	// Patterns whose sizes differ by more than this are probably not the
+	// lookalikes somebody meant to declare, so they get a warning.
 	static constexpr double SIMILAR_SIZE_SPREAD = 0.25;
 
 	std::string  name;     // key the 'detect' command uses
@@ -56,18 +56,18 @@ struct ImagePattern {
 	unsigned     fixed_directions {FIXED_NONE};
 
 	// How far past the pattern a quick search looks, as a fraction of the
-	// pattern's own size. The per axis ones measure against that axis, the
-	// shared one against the longer side. All optional - ImageDetector
-	// fills in its default for whichever are MARGINE_UNSET.
+	// pattern's own size. A per axis value is measured against that axis,
+	// the shared one against the longer side. All are optional:
+	// ImageDetector fills in its default for each MARGINE_UNSET.
 	double search_margine   {MARGINE_UNSET};
 	double search_margine_x {MARGINE_UNSET};
 	double search_margine_y {MARGINE_UNSET};
 
-	// Patterns this one can be mistaken for, by position in the library.
-	// The correlation the search runs on scores by shape and is blind to
-	// hue, so a match is only kept once it has been weighed against these
-	// and none of them fits the same pixels better. Symmetric: naming it
-	// on either pattern is enough.
+	// Patterns this one can be confused with, by index in the library. The
+	// correlation used by the search measures shape and does not see
+	// colour, so a match is kept only after it is compared with these and
+	// none of them fits the same pixels better. The relation works both
+	// ways: naming it on one of the two patterns is enough.
 	eb::Images similar;
 
 	cv::Mat image;  // CV_32FC3, BGR, values 0..1
@@ -81,37 +81,37 @@ struct ImagePattern {
 	bool fixed_y() const noexcept { return 0 != (fixed_directions & FIXED_Y); }
 };
 
-// Patterns are addressed by their position in the library: a name costs a
-// map lookup, so it is resolved once by index() and the index is what gets
-// passed around afterwards.
+// Patterns are addressed by their index in the library. A name costs a map
+// lookup, so index() resolves it once and the index is passed around after
+// that.
 class ImageLibrary {
 public:
 	static constexpr const wchar_t* FILE_NAME = L"eve_images.json";
 
-	// index() answers this when there is no pattern by that name.
+	// What index() returns when there is no pattern with that name.
 	static constexpr size_t NOT_FOUND = static_cast<size_t>(-1);
 
-	// A coordinate nothing is known about. A hit is the top left corner of
-	// a match, so a real one can be 0 but never negative.
+	// A coordinate that nothing is known about. A hit is the top left
+	// corner of a match, so a real one can be 0 but never negative.
 	static constexpr int UNKNOWN = -1;
-	// Stands for a pattern that has never been found.
+	// Means a pattern that has never been found.
 	inline static const cv::Point NEVER_SEEN {UNKNOWN, UNKNOWN};
 
 	// True when anything at all is remembered. Half a corner is possible:
-	// the position cache keeps only the axes a pattern holds still along,
-	// so a position restored at startup may name just one of them.
+	// the position cache keeps only the axes a pattern stays in place
+	// along, so a position restored at startup may give only one of them.
 	static bool seen(const cv::Point& corner) noexcept
 		{ return corner.x > UNKNOWN || corner.y > UNKNOWN; }
 
-	// True when the whole corner is known - what it takes to aim at a
-	// pattern, as opposed to merely searching near it.
+	// True when the whole corner is known. A click needs that much to aim
+	// at a pattern. A search near it needs less.
 	static bool located(const cv::Point& corner) noexcept
 		{ return corner.x > UNKNOWN && corner.y > UNKNOWN; }
 
 	// True when a quick search has what it needs: the pattern keeps its
 	// place along at least one axis, and every axis it keeps is known. The
-	// others are never read, so half a corner is enough for a pattern that
-	// only holds still along one axis.
+	// other axes are never read, so half a corner is enough for a pattern
+	// that stays in place along one axis only.
 	static bool boxable(
 		const ImagePattern& pattern, const cv::Point& corner) noexcept
 	{
@@ -123,8 +123,8 @@ public:
 
 	// Looks for FILE_NAME in the working directory, then next to the
 	// executable, and reads every PNG it names from dir.
-	// default_threshold applies to patterns that name none of their own.
-	// On failure returns false and fills error.
+	// default_threshold is used for patterns that give none of their own.
+	// Returns false and fills error on failure.
 	bool load(
 		const std::wstring& dir, double default_threshold, std::string& error
 	);
@@ -137,12 +137,12 @@ public:
 		std::string&        error
 	);
 
-	// Path the description was read from; empty until loaded.
+	// Path the description was read from, empty until it is loaded.
 	const std::wstring& source_path() const noexcept { return m_source; }
 	const std::wstring& directory()   const noexcept { return m_directory; }
 
-	// Things put right while loading that the file should still be fixed
-	// for. Empty when there was nothing to say.
+	// Problems that loading worked around, but that should still be fixed
+	// in the file. Empty when there was nothing to say.
 	const std::vector<std::string>& warnings() const noexcept
 		{ return m_warnings; }
 
@@ -151,39 +151,40 @@ public:
 	const std::vector<ImagePattern>& patterns() const noexcept
 		{ return m_patterns; }
 
-	// Position of a named pattern, NOT_FOUND when there is none. This is
-	// the only lookup that reports a bad name, so anything that takes a
-	// name from outside - a command line, a bot script - goes through it.
+	// Index of a named pattern, NOT_FOUND when there is none. This is the
+	// only lookup that reports a bad name, so everything that takes a name
+	// from outside, such as a command line, goes through it.
 	size_t index(const std::string& name) const;
 
-	// The pattern itself. Like vector::operator[] the index is not checked.
+	// The pattern itself. The index is not checked, as in vector::operator[].
 	const ImagePattern& operator()(size_t image) const
 		{ return m_patterns[image]; }
 
 	// Comma separated list of the names, for error messages.
 	std::string name_list() const;
 
-	// "'jump'", "'jump' or 'dock'", "'a', 'b' or 'c'" - for messages about
+	// "'jump'", "'jump' or 'dock'", "'a', 'b' or 'c'", for messages about
 	// something that covered more than one pattern.
 	std::string names_text(const eb::Images& images) const;
 
-	// Where a pattern was seen last, or NEVER_SEEN. Kept here rather than in
-	// the detector so that it outlasts any single search, and never cleared:
-	// a remembered corner stays the best guess for where an element will
-	// show up again, even after a search that missed. Written from whichever
-	// thread searched and read from the console, so both take a lock.
+	// Where a pattern was seen last, or NEVER_SEEN. It is kept here and not
+	// in the detector, so that it lives longer than one search, and it is
+	// never cleared: a remembered corner is still the best guess for where
+	// an element will appear again, even after a search that missed. The
+	// thread that searched writes it and the console reads it, so both
+	// take a lock.
 	cv::Point last_hit(size_t image) const;
 
-	// Returns true when the remembered corner actually moved.
+	// Returns true when the remembered corner really moved.
 	bool set_last_hit(size_t image, const cv::Point& corner);
 
-	// Throws away every remembered position. Used when capture moves to a
-	// different client, whose panels are somewhere else entirely.
+	// Drops every remembered position. Used when capture moves to another
+	// client, where the panels are in different places.
 	void forget_hits();
 
 private:
-	// Resolves every SIMILAR name to a position, makes the relation
-	// symmetric, and complains about what it had to put right.
+	// Turns every SIMILAR name into an index, makes the relation work both
+	// ways, and reports what it had to correct.
 	bool link_similar(
 		std::vector<ImagePattern>&           patterns,
 		const std::map<std::string, size_t>& index,

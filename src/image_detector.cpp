@@ -11,7 +11,6 @@
 #include <opencv2/imgproc.hpp>
 
 #include "image_detector.hpp"
-#include "text_util.hpp"
 
 namespace {
 
@@ -30,17 +29,17 @@ bool ImageDetector::detect(
 	const eb::Images& images,
 	Detection&        result,
 	std::string&      error,
-	SearchScope       scope,
+	eb::Scope       scope,
 	int               max_hits)
 {
+	// FUTURE: optimize multi-thread sync for multiple EVE clients monitoring
 	std::lock_guard<std::mutex> lock {m_mutex};
 
-	result = Detection {};
 	if (images.empty()) {
 		error = "no image to search for";
 		return false;
 	}
-	if (SearchScope::NONE == scope) {
+	if (eb::Scope::NONE == scope) {
 		error = "no search scope to look in";
 		return false;
 	}
@@ -50,11 +49,11 @@ bool ImageDetector::detect(
 		return false;
 	}
 
-	// A frame we have not been handed before makes everything remembered
-	// worthless at a stroke: those answers were about pixels that no longer
-	// exist. Capture leaves the frame alone while it is still the newest
-	// there can be, and then the memo stands.
-	if (m_capture.frame(m_frame)) m_memo.clear();
+	// A frame we have not seen before makes every kept answer useless: those
+	// answers were about pixels that are gone. While capture hands back the
+	// same frame, the kept answers still hold.
+	if (m_capture.frame(m_frame))
+		m_memo.clear();
 	if (m_frame.empty()) {
 		error = "no frame captured yet - is the window minimised?";
 		return false;
@@ -74,38 +73,8 @@ bool ImageDetector::detect(
 		}
 	}
 
-	// What is already known about this frame, pattern by pattern. One that
-	// was found answers the whole request, any of them being all that was
-	// asked for; one that was searched and missed need not be searched again.
-	result.scope = scope;
-	result.searched.assign(images.size(), PatternSearch {});
-	std::vector<const Remembered*> known(images.size(), nullptr);
-	bool answered {false};
-	for (size_t at = 0; at < images.size(); ++at) {
-		result.searched[at].image = images[at];
-		for (const Remembered& memo : m_memo) {
-			if (!memo.answers(images[at], max_hits, scope)) continue;
-			known[at]             = &memo;
-			result.searched[at]   = memo.searched;
-			answered              = answered || !memo.hits.empty();
-			break;
-		}
-	}
-	if (answered) {
-		for (size_t at = 0; at < images.size(); ++at) {
-			if (!known[at]) continue;
-			result.hits.insert(
-				result.hits.end(),
-				known[at]->hits.begin(), known[at]->hits.end()
-			);
-		}
-		result.remembered = true;
-		rank_hits(result.hits, max_hits);
-		return true;
-	}
-
-	// The frame is our own copy, so wrapping it costs nothing; the cast is
-	// only needed because cv::Mat has no const-pointer constructor.
+	// The frame is our own copy, so wrapping it costs nothing. The cast is
+	// needed only because cv::Mat has no constructor for a const pointer.
 	const cv::Mat captured {
 		static_cast<int>(m_frame.height),
 		static_cast<int>(m_frame.width),
@@ -117,82 +86,156 @@ bool ImageDetector::detect(
 		0, 0, static_cast<int>(m_frame.width), static_cast<int>(m_frame.height)
 	};
 
-	// Hits per pattern, so each can be remembered on its own account. The
-	// answer merges them; the memo does not.
-	std::vector<std::vector<DetectionHit>> mine(images.size());
-	try {
-		// A box is only worth searching when the pattern is known to stay put
-		// along at least one axis and has been seen there at least once. Each
-		// pattern answers that for itself.
-		std::string no_box;
+	// Where a quick search would look, worked out for every pattern first.
+	// It is both what the box pass searches and what a box request cuts a
+	// kept answer down to. A box is only possible when the pattern stays in
+	// place along at least one axis and has been seen there once. Each
+	// pattern answers that for itself.
+	result = Detection {};
+	result.searched.assign(images.size(), PatternSearch {});
+	for (size_t at = 0; at < images.size(); ++at) {
+		const ImagePattern& pattern  = m_library(images[at]);
+		const cv::Point     last_hit = m_library.last_hit(images[at]);
+
+		result.searched[at].image = images[at];
+		if (eb::Scope::FULL != scope && ImageLibrary::boxable(pattern, last_hit)) {
+			result.searched[at].scope = eb::Scope::BOX;
+			result.searched[at].box   = quick_box(pattern, last_hit, whole);
+		}
+	}
+
+	// What one pattern is really searched for. A quick search needs a box,
+	// so a pattern that has none is searched over the whole frame instead.
+	// Only that pattern: widening the whole request would take the boxes of
+	// the others away, and which ones lost them would depend on the order
+	// they were named in. Ask it before a pass writes down where it really
+	// looked, because that is the field it reads.
+	const auto scope_wanted = [&](size_t at) {
+		return eb::Scope::BOX == result.searched[at].scope
+			? scope : eb::Scope::FULL;
+	};
+
+	// Hits kept per pattern, so each can be remembered on its own. The
+	// answer joins them together. The memo keeps them apart.
+	std::vector<std::vector<DetectionHit>> recalled(images.size());
+
+	// What is already known about this frame, pattern by pattern. A pattern
+	// that was found answers the whole request, because any one of them is
+	// enough. A pattern that was searched for and missed does not have to be
+	// searched again.
+	std::vector<bool> known(images.size(), false);
+	bool              answered {false};
+	for (size_t at = 0; at < images.size(); ++at) {
+		const eb::Scope asked {scope_wanted(at)};
+		for (const Remembered& memo : m_memo) {
+			if (!memo.answers(images[at], max_hits, asked)) continue;
+
+			std::vector<DetectionHit> hits = memo.hits;
+			if (eb::Scope::BOX == asked && eb::Scope::FULL == memo.scope) {
+				// Cut down to the box that was asked about. A hit counts
+				// only if the whole pattern fits inside the box, because
+				// that is all a search of the box could have found.
+				const ImagePattern& pattern = m_library(images[at]);
+				const cv::Rect&     box     = result.searched[at].box;
+				const cv::Size      size {pattern.width(), pattern.height()};
+				hits.erase(
+					std::remove_if(
+						hits.begin(), hits.end(),
+						[&](const DetectionHit& hit) {
+							const cv::Rect where {hit.at, size};
+							return (box & where) != where;
+						}
+					),
+					hits.end()
+				);
+				// A whole frame search that stopped at its own limit may
+				// have used all its room on hits outside the box. Then it
+				// says nothing about the box. It can answer for the box
+				// only if enough hits are left, or if the search ran out
+				// of candidates instead of room.
+				if (hits.size() < static_cast<size_t>(max_hits) && !memo.exhaustive())
+					continue;
+			}
+			rank_hits(hits, max_hits);
+
+			known[at]           = true;
+			recalled[at]        = std::move(hits);
+			result.searched[at] = memo.searched;
+			answered            = answered || !recalled[at].empty();
+			break;
+		}
+	}
+	if (answered) {
 		for (size_t at = 0; at < images.size(); ++at) {
-			if (known[at]) continue;   // searched already, and not there
-
-			const ImagePattern& pattern = m_library(images[at]);
-			const cv::Point     last    = m_library.last_hit(images[at]);
-			if (SearchScope::FULL != scope
-				&& ImageLibrary::boxable(pattern, last))
-			{
-				result.searched[at].scope = SearchScope::BOX;
-				result.searched[at].box   = quick_box(pattern, last, whole);
-			}
-			else if (SearchScope::BOX == scope) {
-				// Skipping it would answer a question nobody asked - "is it
-				// in the boxes of the others" - and look like a complete
-				// answer.
-				if (!no_box.empty()) no_box += ", ";
-				no_box += "'" + pattern.name + "' "
-				        + (FIXED_NONE == pattern.fixed_directions
-				           ? "has no FIXED_DIRECTIONS in "
-				             + to_utf8(ImageLibrary::FILE_NAME)
-				           : std::string("has not been found yet"));
-			}
+			result.hits.insert(
+				result.hits.end(), recalled[at].begin(), recalled[at].end()
+			);
 		}
-		if (!no_box.empty()) {
-			error  = "no quick search: " + no_box;
-			result = Detection {};
-			return false;
-		}
+		result.remembered = true;
+		rank_hits(result.hits, max_hits);
+		return true;
+	}
 
-		// One pattern's share of the work, wherever it is being looked for.
-		const auto look = [&](size_t at, const cv::Rect& area) {
+	try {
+		// The frame as float BGR, which is what matchTemplate needs.
+		// Converting only the searched rectangle is what makes a quick
+		// search cheap. On an ultrawide frame the conversion alone costs
+		// more than matching a small box.
+		const auto converted = [&captured](const cv::Rect& area) {
+			cv::Mat colour;
+			cv::cvtColor(captured(area), colour, cv::COLOR_BGRA2BGR);
+			cv::Mat scene;
+			colour.convertTo(scene, CV_32FC3, COLOUR_SCALE);
+			return scene;
+		};
+
+		// One pattern's share of the work, in whatever area it is looked
+		// for. origin says where that area starts in the frame.
+		const auto look = [&](size_t at, const cv::Mat& scene, const cv::Point& origin)
+		{
 			PatternSearch& part = result.searched[at];
 			int mistaken {0};
-			search_area(captured, area, part.image, max_hits, mine[at], mistaken);
+			search_area(scene, origin, part.image, max_hits, recalled[at], mistaken);
 			part.mistaken += mistaken;
-			if (mine[at].empty()) return;
+			if (recalled[at].empty()) return;
 
-			for (DetectionHit& hit : mine[at]) hit.scope = scope;
-			// Remembering where it went is what makes the next search quick.
-			// A position that has not moved is not offered to the cache.
-			const cv::Point corner = mine[at].front().at;
+			// Writing down where it was found is what makes the next search
+			// quick. A position that did not move is not sent to the cache.
+			const cv::Point corner = recalled[at].front().at;
 			if (m_library.set_last_hit(part.image, corner))
 				m_cache.store(m_library(part.image), corner);
 		};
 
-		// Every box before any full frame: one pattern that has moved must
-		// not cost the others their quick pass.
+		// All boxes before any whole frame search: one pattern that moved
+		// must not cost the others their quick search.
 		bool any {false};
 		for (size_t at = 0; at < images.size(); ++at) {
-			// A remembered part carries the box of the search that made it,
-			// which is not an invitation to search it over again.
+			// A remembered part keeps the box of the search that made it.
+			// That is not a reason to search it again.
 			if (known[at]) continue;
-			if (SearchScope::BOX != result.searched[at].scope) continue;
-			look(at, result.searched[at].box);
-			any = any || !mine[at].empty();
+			if (eb::Scope::BOX != result.searched[at].scope) continue;
+			const cv::Rect& box = result.searched[at].box;
+			look(at, converted(box), box.tl());
+			any = any || !recalled[at].empty();
 		}
 
-		// Nothing anywhere means the caller gets the slow answer it asked
-		// for, for all of the patterns, since any of them would do. A box
-		// that did answer spares the rest that cost, and the ones left at
-		// NONE say plainly they were never looked at.
-		if (!any && SearchScope::BOX != scope) {
+		// Nothing found in any box means the whole frame is searched, for
+		// every pattern, because any of them will do. If a box did find
+		// something, the others are spared that cost, and the ones left at
+		// NONE say they were never looked at.
+		if (!any) {
+			// Every pattern here reads the same pixels, so the whole frame
+			// is converted once and shared. Built on first use, because a
+			// box only request may leave this loop with nothing to do.
+			cv::Mat scene;
 			for (size_t at = 0; at < images.size(); ++at) {
 				if (known[at]) continue;
+				if (eb::Scope::BOX == scope_wanted(at)) continue;
+				if (scene.empty()) scene = converted(whole);
 				result.searched[at].scope =
-					SearchScope::BOX == result.searched[at].scope
-						? SearchScope::BOX_THEN_FULL : SearchScope::FULL;
-				look(at, whole);
+					eb::Scope::BOX == result.searched[at].scope
+						? eb::Scope::BOX_THEN_FULL : eb::Scope::FULL;
+				look(at, scene, whole.tl());
 			}
 		}
 	}
@@ -202,24 +245,26 @@ bool ImageDetector::detect(
 		return false;
 	}
 
-	// Each pattern on its own account, so that a later request naming it
-	// among others finds it here whatever else it is asked alongside.
+	// Each pattern is kept on its own, so a later request finds it here
+	// whatever other patterns it is asked with.
 	for (size_t at = 0; at < images.size(); ++at) {
 		if (known[at]) continue;
 		result.hits.insert(
-			result.hits.end(), mine[at].begin(), mine[at].end()
+			result.hits.end(), recalled[at].begin(), recalled[at].end()
 		);
-		// One never looked at settles nothing: another pattern answered
+		// A pattern never looked at answers nothing: another one was found
 		// before this one cost anything.
-		if (SearchScope::NONE == result.searched[at].scope) continue;
-		// A miss settles only the ground that was covered; a hit settles
-		// the question that was asked.
+		if (eb::Scope::NONE == result.searched[at].scope) continue;
+		// The area covered, not the name of the request: a box-then-full
+		// search that stopped at the box covered the box, and one that went
+		// on covered the frame.
 		m_memo.push_back(Remembered {
 			images[at],
 			max_hits,
-			mine[at].empty() ? result.searched[at].scope : scope,
+			eb::Scope::BOX == result.searched[at].scope
+				? eb::Scope::BOX : eb::Scope::FULL,
 			result.searched[at],
-			mine[at]
+			recalled[at]
 		});
 	}
 	rank_hits(result.hits, max_hits);
@@ -228,8 +273,8 @@ bool ImageDetector::detect(
 
 void ImageDetector::rank_hits(std::vector<DetectionHit>& hits, int max_hits)
 {
-	// Best first, whichever pattern it came from, and never more than were
-	// asked for: each pattern may have contributed up to max_hits.
+	// Best first, from whichever pattern, and never more than were asked
+	// for: each pattern may have added up to max_hits.
 	std::stable_sort(
 		hits.begin(), hits.end(),
 		[](const DetectionHit& one, const DetectionHit& other) {
@@ -241,8 +286,8 @@ void ImageDetector::rank_hits(std::vector<DetectionHit>& hits, int max_hits)
 }
 
 void ImageDetector::search_area(
-	const cv::Mat&             captured,
-	const cv::Rect&            area,
+	const cv::Mat&             scene,
+	const cv::Point&           origin,
 	size_t                     image,
 	int                        max_hits,
 	std::vector<DetectionHit>& hits,
@@ -250,36 +295,25 @@ void ImageDetector::search_area(
 {
 	const ImagePattern& pattern = m_library(image);
 
-	// Converting only the searched rectangle is what makes a quick search
-	// cheap: on an ultrawide frame the conversion alone costs more than
-	// matching a small box does.
-	cv::Mat colour;
-	cv::cvtColor(captured(area), colour, cv::COLOR_BGRA2BGR);
-	cv::Mat scene;
-	colour.convertTo(scene, CV_32FC3, 1.0 / 255.0);
-
 	cv::Mat result;
 	cv::matchTemplate(
 		scene, pattern.image, result, cv::TM_CCOEFF_NORMED,
 		pattern.masked() ? pattern.mask : cv::noArray()
 	);
-
-	// Normalised correlation divides by the variance under the mask, which is
-	// zero wherever both frame and pattern are flat - those positions come
-	// back as NaN or infinity and would otherwise win every search.
+	// Normalised correlation divides by the variance under the mask. That
+	// variance is zero where both frame and pattern are flat, so those
+	// positions come back as NaN or infinity and would win every search.
 	cv::patchNaNs(result, 0.0f);
-	cv::threshold(
-		result, result, MAX_VALID_CERTAINTY, 0.0, cv::THRESH_TOZERO_INV
-	);
+	cv::threshold(result, result, MAX_VALID_CERTAINTY, 0.0, cv::THRESH_TOZERO_INV);
 
 	const int pad_x = pattern.width()  / SUPPRESSION_DIVISOR;
 	const int pad_y = pattern.height() / SUPPRESSION_DIVISOR;
 
-	// Both sides of a contest are weighed over one window, wide enough to
-	// hold the largest lookalike wherever it sits: a rival a pixel or two out
-	// of step, or a size or two bigger, still gets its best shot. The
-	// candidate is not pinned to the corner the correlation liked, because
-	// that corner is its best by a different measure.
+	// Both patterns are measured over the same window. It is wide enough to
+	// hold the largest lookalike wherever it sits, so a rival one or two
+	// pixels off, or a little bigger, still gets its best chance. The
+	// candidate is not fixed to the corner the correlation chose, because
+	// that corner is its best by another measure.
 	int slack = MIN_MARGINE;
 	for (const size_t twin : pattern.similar) {
 		const ImagePattern& other = m_library(twin);
@@ -287,25 +321,25 @@ void ImageDetector::search_area(
 		slack = std::max(slack, std::abs(other.height() - pattern.height()));
 	}
 
-	// Whichever lookalike claimed the last candidate is tried first on the
-	// next one: on a screen full of one kind of thing, that is usually the
-	// one that will claim it again, and the rest need never be measured.
+	// The lookalike that took the last candidate is tried first on the next
+	// one. On a screen full of one kind of thing it usually takes that one
+	// too, and the rest are never measured.
 	size_t first_twin = 0;
 
 	hits.clear();
 	mistaken = 0;
-	// Every candidate is blanked below, accepted or not, so each pass takes at
-	// least one position out of a finite map: the search ends on its own once
-	// nothing is left above the threshold.
+	// Every candidate is blanked below, taken or not, so each pass removes at
+	// least one position from a map of finite size. The search ends by itself
+	// when nothing is left above the threshold.
 	while (static_cast<int>(hits.size()) < max_hits) {
 		double    certainty {0.0};
 		cv::Point at;
 		cv::minMaxLoc(result, nullptr, &certainty, nullptr, &at);
 		if (certainty < pattern.threshold) break;
 
-		// The shape fits. If anything it could be mistaken for explains these
-		// pixels better, it was that thing and not this one.
-		double fit {0.0};
+		// The shape fits. If a pattern it can be confused with matches these
+		// pixels better, then it is that pattern and not this one.
+		double fit     {0.0};
 		bool   claimed {false};
 		if (!pattern.similar.empty()) {
 			cv::Rect window {
@@ -316,12 +350,12 @@ void ImageDetector::search_area(
 
 			fit = best_fit(scene, window, pattern);
 			for (size_t step = 0; step < pattern.similar.size(); ++step) {
-				const size_t twin =
-					pattern.similar[(first_twin + step) % pattern.similar.size()];
-				// Stop at the first one that fits better - measuring the rest
+				const size_t idx  {(first_twin + step) % pattern.similar.size()},
+				             twin {pattern.similar[idx]};
+				// Stop at the first one that fits better: measuring the rest
 				// cannot change the answer.
 				if (best_fit(scene, window, m_library(twin)) < fit) {
-					first_twin = (first_twin + step) % pattern.similar.size();
+					first_twin = idx;
 					claimed = true;
 					break;
 				}
@@ -332,23 +366,16 @@ void ImageDetector::search_area(
 		} else {
 			// matchTemplate positions are top left corners already, so a hit
 			// only moves from result into frame coordinates.
-			hits.push_back(
-				DetectionHit {image, at + area.tl(), certainty, fit}
-			);
+			hits.push_back(DetectionHit {image, at + origin, certainty, fit});
 		}
 
-		// Blank this match either way: a rejected one left standing would
-		// simply be found again on the next pass, forever.
-		const int left   = std::max(0, at.x - pad_x);
-		const int top    = std::max(0, at.y - pad_y);
-		const int right  = std::min(
-			result.cols, at.x + pattern.width()  + pad_x
-		);
-		const int bottom = std::min(
-			result.rows, at.y + pattern.height() + pad_y
-		);
-		result(cv::Rect(left, top, right - left, bottom - top)) =
-			cv::Scalar(0.0);
+		// Blank this match either way. A rejected one left in place would be
+		// found again on every pass after it.
+		const int left   {std::max(0, at.x - pad_x)},
+		          top    {std::max(0, at.y - pad_y)},
+		          right  {std::min(result.cols, at.x + pattern.width()  + pad_x)},
+		          bottom {std::min(result.rows, at.y + pattern.height() + pad_y)};
+		result(cv::Rect(left, top, right - left, bottom - top)) = cv::Scalar(0.0);
 	}
 }
 
@@ -363,9 +390,9 @@ double ImageDetector::best_fit(
 		return WORST_FIT;
 	}
 
-	// TM_SQDIFF, not the TM_CCOEFF_NORMED the search runs on: this is the
-	// step that has to see a difference in colour, and CCOEFF removes each
-	// channel's mean before correlating, which is exactly what hides one.
+	// TM_SQDIFF here, not the TM_CCOEFF_NORMED the search uses. This step has
+	// to see a difference in colour, and CCOEFF removes the mean of each
+	// channel before it correlates, which hides exactly that.
 	cv::Mat result;
 	cv::matchTemplate(
 		scene(window), pattern.image, result, cv::TM_SQDIFF,
@@ -375,9 +402,9 @@ double ImageDetector::best_fit(
 	double closest {0.0};
 	cv::minMaxLoc(result, &closest, nullptr, nullptr, nullptr);
 
-	// What OpenCV's masked TM_SQDIFF has to be divided by to become a mean:
-	// it multiplies the difference by the mask before squaring, so the weight
-	// lands in the sum squared as well.
+	// What OpenCV's masked TM_SQDIFF must be divided by to become a mean. It
+	// multiplies the difference by the mask before squaring, so the weight is
+	// squared in the sum as well.
 	double weight {0.0};
 	if (!pattern.masked()) {
 		weight = static_cast<double>(pattern.width())
@@ -391,16 +418,16 @@ double ImageDetector::best_fit(
 	if (weight <= 0.0) return WORST_FIT;
 
 	// Back to the images' own scale, and comparable between patterns of
-	// different sizes. Rounding can leave the sum a hair below zero.
+	// different sizes. Rounding can leave the sum a little below zero.
 	return std::sqrt(std::max(0.0, closest) / weight);
 }
 
 cv::Point ImageDetector::search_margines(const ImagePattern& pattern) const
 {
-	// A per axis fraction is measured against that axis, the shared one and
-	// the default against the longer side - so a wide flat button ends up with
-	// as much room above it as beside it, which is where a panel that grew a
-	// line actually moved it.
+	// A fraction given for one axis is measured against that axis. The shared
+	// fraction and the default are measured against the longer side. So a
+	// wide flat button gets as much room above it as beside it, and that is
+	// where a panel with one more line moves it.
 	const auto pixels = [this, &pattern](double axis, int size) {
 		const double fraction =
 			ImagePattern::margine_given(axis)                   ? axis :
@@ -444,9 +471,9 @@ cv::Rect ImageDetector::quick_box(
 
 namespace {
 
-// The pattern where it was last seen, widened by margin and clipped to the
-// frame. Clipping never makes the span narrower than the pattern, which would
-// leave nothing to match.
+// The pattern where it was last seen, widened by the margin and clipped to
+// the frame. Clipping never makes the span smaller than the pattern, which
+// would leave nothing to match.
 void quick_span(int at, int size, int margin, int limit, int& start, int& length)
 {
 	start   = std::max(0, at - margin);

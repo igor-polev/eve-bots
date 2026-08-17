@@ -36,25 +36,25 @@ constexpr eb::Millis FOCUS_SETTLE  {150};
 // How often the desktop is looked at while waiting for it to be free.
 constexpr eb::Millis YIELD_POLL {50};
 
-// GetLastInputInfo counts injected input as input, so our own clicks look
-// exactly like the user being busy: after one click the desktop would
-// appear to be in use for the whole idle time, every time, entirely by
-// ourselves. The tick of the last event we sent is therefore remembered,
-// and anything no newer than that is not the user.
+// GetLastInputInfo counts our own injected input too, so our clicks look
+// exactly like a busy user: after one click the desktop would seem to be in
+// use for the whole idle time, every time, because of us. So we remember
+// the tick of the last event we sent, and anything not newer than that did
+// not come from the user.
 std::atomic<DWORD> g_our_input  {0};
 std::atomic<DWORD> g_user_input {0};
 std::atomic<bool>  g_user_known {false};
 
 void note_our_input() { g_our_input.store(GetTickCount()); }
 
-// How long since the user last touched the mouse or the keyboard. Ticks
-// wrap round every 49 days, so the comparisons are made on signed
-// differences rather than on the values themselves.
+// How long since the user last touched the mouse or the keyboard. The tick
+// count wraps around every 49 days, so the tests compare signed differences
+// and not the values themselves.
 eb::Millis user_quiet_for()
 {
 	LASTINPUTINFO info {};
 	info.cbSize = sizeof(info);
-	// Not known ever to fail; if it somehow does, the answer that leaves
+	// It is not known to fail. If it ever does, the answer that keeps
 	// programs working is that nobody is using the desktop.
 	if (!GetLastInputInfo(&info)) return std::chrono::hours {24};
 
@@ -71,9 +71,9 @@ eb::Millis user_quiet_for()
 	return eb::Millis {std::max<LONG>(0, quiet)};
 }
 
-// Waits for a gap in what the user is doing. Running out of time ends the
-// waiting rather than the click: stalling a program indefinitely is worse
-// than one interrupted keystroke, so the caller goes ahead.
+// Waits for a gap in the user's work. Running out of time ends the waiting,
+// not the click: holding a program up for ever is worse than one
+// interrupted keystroke, so the caller goes ahead.
 void wait_for_quiet(eb::Millis needed, eb::TimePoint deadline, bool& yielded)
 {
 	if (needed <= eb::Millis::zero()) return;
@@ -111,7 +111,7 @@ bool map_point(
 	return true;
 }
 
-// Name of whatever window owns a point on the desktop, for the message
+// Name of the window that owns a point on the desktop, for the message
 // that explains a refused click.
 std::string window_name(HWND window)
 {
@@ -119,8 +119,8 @@ std::string window_name(HWND window)
 	const int length = GetWindowTextW(window, title, 128);
 	if (length <= 0) return "another window";
 
-	// The console is UTF-8 and these titles are only ever shown to a
-	// person, so a lossy narrowing is good enough here.
+	// The console is UTF-8 and these titles are only shown to a person,
+	// so losing some characters here is good enough.
 	std::string name;
 	for (int i = 0; i < length; ++i) {
 		const wchar_t c = title[i];
@@ -129,13 +129,13 @@ std::string window_name(HWND window)
 	return "'" + name + "'";
 }
 
-// Asks for a window to be brought forward. Does not wait for it.
+// Asks for a window to be brought to the front. Does not wait for it.
 //
-// Windows only lets the process that already owns the foreground, or that
-// supplied the last input, hand it to somebody else; everyone else just
-// gets a flashing taskbar button. Attaching our input queue to the
-// foreground window's thread makes Windows treat the two as one thread,
-// which is the documented way past that rule.
+// Windows lets only two kinds of process hand the foreground to somebody
+// else: the one that already holds it, and the one that sent the last
+// input. Everybody else gets a flashing taskbar button. Attaching our input
+// queue to the thread of the foreground window makes Windows treat the two
+// as one thread, and that is the documented way around the rule.
 void raise_window(HWND window)
 {
 	if (IsIconic(window)) ShowWindow(window, SW_RESTORE);
@@ -152,10 +152,10 @@ void raise_window(HWND window)
 	if (shared) AttachThreadInput(ours, theirs, FALSE);
 }
 
-// Puts the desktop back the way it was found - the cursor where it was and
-// the focus on whatever held it - however click_at() ends. A destructor
-// rather than a call at the end, so a click refused after the game was
-// raised does not walk off with the focus it took.
+// Puts the desktop back as it was: the cursor where it was, and the focus
+// on the window that held it. This happens however click_at() ends. It is a
+// destructor and not a call at the end, so a click that is refused after
+// the game was raised does not keep the focus it took.
 class Desktop {
 public:
 	Desktop(const POINT& cursor, HWND front, bool* restored)
@@ -166,12 +166,12 @@ public:
 	~Desktop()
 	{
 		SetCursorPos(m_cursor.x, m_cursor.y);
-		// Putting the cursor back is input too, and would otherwise read
-		// back as the user having just moved the mouse.
+		// Putting the cursor back is input too, and would otherwise look
+		// like the user moving the mouse.
 		note_our_input();
 
-		// Nothing to give back if the game already had the focus, or if
-		// whatever held it has since closed.
+		// Nothing to give back when the game already had the focus, or
+		// when the window that held it has closed.
 		if (!m_front || !IsWindow(m_front)) return;
 		if (GetForegroundWindow() == m_front) return;
 
@@ -199,8 +199,8 @@ bool bring_to_front(HWND window, bool& activated, std::string& error)
 	     waited += FOCUS_POLL)
 	{
 		if (GetForegroundWindow() == window) {
-			// Being in front is not the same as being ready for input: the
-			// game picks its input handling back up on the next frame.
+			// Being in front is not the same as being ready for input. The
+			// game starts reading input again on its next frame.
 			std::this_thread::sleep_for(FOCUS_SETTLE);
 			return true;
 		}
@@ -212,10 +212,10 @@ bool bring_to_front(HWND window, bool& activated, std::string& error)
 	return false;
 }
 
-// One go at the disturbing part: raise the game, make sure the point on
-// screen still belongs to it, click it. The desktop is put back however this
-// ends. busy says it was in somebody else's hands, which is the one outcome
-// worth trying again.
+// One attempt at the disturbing part: raise the game, check that the point
+// on screen still belongs to it, and click. The desktop is put back however
+// this ends. busy means the desktop was in somebody else's hands, and that
+// is the one result worth trying again.
 bool try_click(
 	HWND             window,
 	const cv::Point& frame,
@@ -225,29 +225,29 @@ bool try_click(
 {
 	busy = false;
 
-	// Taken before anything is disturbed, so it can all be put back.
+	// Read before anything is disturbed, so it can all be put back.
 	POINT cursor_was {};
 	GetCursorPos(&cursor_was);
 	const HWND front_was = GetForegroundWindow();
 
-	// From here on the desktop gets disturbed, so arm the undo first.
+	// From here on the desktop is disturbed, so set up the undo first.
 	const Desktop desktop {cursor_was, front_was, &result.restored};
 
-	// Before anything else, because an inactive window eats the click that
-	// activates it, and because this changes what is on top at the point
-	// the occlusion check below looks at.
+	// This comes first, because an inactive window eats the click that
+	// activates it, and because raising the window changes what is on top
+	// at the point the check below looks at.
 	if (!bring_to_front(window, result.activated, error)) {
 		busy = true;
 		return false;
 	}
 
-	// The window moves while it is coming forward on some setups, so the
-	// point is mapped again now that it has settled.
+	// On some systems the window moves while it comes to the front, so the
+	// point is mapped again now that the window has settled.
 	if (!map_point(window, frame, result.screen, error)) return false;
 
-	// Capture sees through whatever is covering the game, so a pattern can
-	// be found at a point that on screen belongs to somebody else. Clicking
-	// it would press a button in that application instead.
+	// Capture sees through anything that covers the game, so a pattern can be
+	// found at a point that belongs on screen to another window. Clicking it
+	// would press a button in that other application.
 	const POINT at {result.screen.x, result.screen.y};
 	const HWND  owner = GetAncestor(WindowFromPoint(at), GA_ROOT);
 	if (owner != window) {
@@ -257,8 +257,8 @@ bool try_click(
 		return false;
 	}
 
-	// Absolute SendInput coordinates are 0..65535 across the whole virtual
-	// desktop, not pixels, and not relative to any one monitor.
+	// Absolute SendInput coordinates run 0..65535 across the whole virtual
+	// desktop. They are not pixels, and not relative to one monitor.
 	const int left   = GetSystemMetrics(SM_XVIRTUALSCREEN);
 	const int top    = GetSystemMetrics(SM_YVIRTUALSCREEN);
 	const int width  = GetSystemMetrics(SM_CXVIRTUALSCREEN);
@@ -268,10 +268,10 @@ bool try_click(
 		return false;
 	}
 
-	// Move, press and release go one at a time with a pause between, so
-	// each lands in a different rendered frame. Sent together they arrive
-	// in the same instant and the game can miss the pointer ever being
-	// there.
+	// Move, press and release are sent one at a time with a pause between,
+	// so each lands in a different rendered frame. Sent together they
+	// arrive in the same instant, and the game can miss the pointer being
+	// there at all.
 	INPUT move {};
 	move.type       = INPUT_MOUSE;
 	move.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
@@ -299,7 +299,7 @@ bool try_click(
 	release.type       = INPUT_MOUSE;
 	release.mi.dwFlags = MOUSEEVENTF_LEFTUP;
 	if (1 != SendInput(1, &release, sizeof(INPUT))) {
-		// the button is down and staying down - say so plainly
+		// the button is down and stays down, so say it plainly
 		error = "the mouse button was pressed but "
 		      + last_error_text("SendInput") + " on release";
 		note_our_input();
@@ -324,8 +324,8 @@ bool click_at(
 		error = "the captured window is gone";
 		return false;
 	}
-	// Nothing sensible can be clicked on a window that is not on screen,
-	// and capture would have stopped producing frames anyway.
+	// Nothing useful can be clicked on a window that is not on screen, and
+	// capture would have stopped sending frames anyway.
 	if (IsIconic(window)) {
 		error = "the window is minimised";
 		return false;
@@ -338,8 +338,8 @@ bool click_at(
 
 	result = ClickResult {};
 	result.frame = frame;
-	// Only to settle now that the window can be located at all; try_click
-	// maps it again once the game has come forward.
+	// Only to check that the window can be found at all. try_click maps the
+	// point again once the game is in front.
 	if (!map_point(window, frame, result.screen, error)) return false;
 
 	const eb::TimePoint deadline =
@@ -350,19 +350,19 @@ bool click_at(
 
 		bool busy = false;
 		if (try_click(window, frame, result, busy, error)) break;
-		// Anything but the desktop being in use would fail the same way
-		// however long we waited, so it is reported as it stands.
+		// Anything except a busy desktop would fail the same way however
+		// long we waited, so it is reported as it is.
 		if (!busy) return false;
-		// And when it is, the error from the last attempt is the right
-		// thing to report once the patience runs out.
+		// And when the desktop is busy, the error from the last attempt
+		// is the right one to report when the waiting runs out.
 		if (eb::Clock::now() >= deadline) return false;
 
 		result.yielded = true;
 		std::this_thread::sleep_for(YIELD_POLL);
 	}
 
-	// Out here rather than inside the attempt, so the game gets its moment
-	// to react with the focus already back where it belongs.
+	// Out here and not inside the attempt, so the game gets its moment to
+	// react with the focus already back where it belongs.
 	if (wait > eb::Millis::zero()) std::this_thread::sleep_for(wait);
 	return true;
 }

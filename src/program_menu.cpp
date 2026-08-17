@@ -18,8 +18,8 @@
 
 #include "program_menu.hpp"
 
-// The Win32 backend hands keyboard and mouse messages to ImGui. It is
-// declared in the backend's own source rather than its header.
+// The Win32 backend passes keyboard and mouse messages to ImGui. It is
+// declared in the backend's own source file, not in its header.
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
 	HWND window, UINT message, WPARAM wparam, LPARAM lparam
 );
@@ -28,8 +28,8 @@ namespace {
 
 constexpr size_t NOT_CHOSEN = static_cast<size_t>(-1);
 
-// The key that starts entry i: 1 for the first, 0 for the tenth, the way
-// the entries are labelled.
+// The key that starts entry i: 1 for the first, 0 for the tenth, as the
+// entries are labelled.
 ImGuiKey number_key(size_t entry)
 {
 	return 9 == entry
@@ -57,8 +57,8 @@ RECT work_area_at(const POINT& at)
 	if (GetMonitorInfoW(MonitorFromPoint(at, MONITOR_DEFAULTTONEAREST), &screen))
 		return screen.rcWork;
 
-	// No monitor answered, which should not happen; the primary display's
-	// size is at least somewhere on the desktop.
+	// No monitor answered, which should not happen. The size of the
+	// primary display is at least somewhere on the desktop.
 	return RECT {
 		0, 0,
 		GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)
@@ -86,8 +86,8 @@ bool ProgramMenu::start(const Hotkey& key, MenuHooks hooks, std::string& error)
 	m_hotkey = key;
 	m_hooks  = std::move(hooks);
 
-	// The thread owns everything it makes, so start() cannot tell whether
-	// the window and the device worked out until the thread says so.
+	// The thread owns everything it creates, so start() cannot know whether
+	// the window and the device were made until the thread says so.
 	std::promise<std::string> ready;
 	std::future<std::string>  answer = ready.get_future();
 	try {
@@ -112,8 +112,8 @@ bool ProgramMenu::start(const Hotkey& key, MenuHooks hooks, std::string& error)
 void ProgramMenu::stop()
 {
 	if (m_thread.joinable()) {
-		// Wakes the thread wherever it is waiting; it tears its own window
-		// and device down, since it is the only one allowed to.
+		// Wakes the thread wherever it waits. It destroys its own window
+		// and device, because only it is allowed to.
 		if (m_window) PostMessageW(m_window, WM_CLOSE, 0, 0);
 		m_thread.join();
 	}
@@ -122,8 +122,8 @@ void ProgramMenu::stop()
 
 void ProgramMenu::thread_main(std::promise<std::string> ready)
 {
-	// Direct3D and DXGI want an apartment, and init_apartment is per
-	// thread - main() initialising its own does nothing for this one.
+	// Direct3D and DXGI need an apartment, and init_apartment works per
+	// thread. The one main() made does nothing for this thread.
 	winrt::init_apartment(winrt::apartment_type::multi_threaded);
 
 	std::string error;
@@ -139,8 +139,8 @@ void ProgramMenu::thread_main(std::promise<std::string> ready)
 	MSG message {};
 	bool quit {false};
 	while (!quit) {
-		// Nothing to draw while the menu is down, so the thread costs
-		// nothing at all until a message - the hotkey, usually - arrives.
+		// Nothing to draw while the menu is closed, so the thread costs
+		// nothing until a message arrives, usually the hotkey.
 		if (!m_visible) WaitMessage();
 
 		while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
@@ -160,8 +160,8 @@ bool ProgramMenu::build(std::string& error)
 {
 	const HINSTANCE instance = GetModuleHandleW(nullptr);
 
-	// Only ever one menu, and only this thread registers anything, so a
-	// plain flag is enough to keep a second start() from failing here.
+	// There is only one menu, and only this thread registers anything, so a
+	// plain flag is enough to stop a second start() from failing here.
 	static bool registered {false};
 	if (!registered) {
 		WNDCLASSEXW description {};
@@ -178,9 +178,9 @@ bool ProgramMenu::build(std::string& error)
 		registered = true;
 	}
 
-	// A tool window so it stays out of the taskbar and the alt-tab list,
-	// topmost so it is not drawn behind the game it appeared over, and
-	// created hidden because the first frame is what decides its size.
+	// A tool window, so it stays out of the taskbar and the alt-tab list.
+	// Topmost, so it is not drawn behind the game it appeared over. Created
+	// hidden, because the first frame decides its size.
 	m_window = CreateWindowExW(
 		WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
 		WINDOW_CLASS, WINDOW_TITLE,
@@ -234,7 +234,7 @@ bool ProgramMenu::build(std::string& error)
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGuiIO& io = ImGui::GetIO();
-	// Nothing of the menu's belongs on disk beside the executable.
+	// The menu keeps nothing on disk next to the executable.
 	io.IniFilename = nullptr;
 	io.LogFilename = nullptr;
 	apply_style(scale());
@@ -253,8 +253,8 @@ bool ProgramMenu::build(std::string& error)
 
 void ProgramMenu::demolish()
 {
-	// Backwards through build(), and each step guarded, because demolish()
-	// also cleans up after a build() that failed halfway.
+	// Backwards through build(), and every step is checked, because
+	// demolish() also cleans up after a build() that failed half way.
 	if (m_imgui_ready) {
 		ImGui_ImplDX11_Shutdown();
 		ImGui_ImplWin32_Shutdown();
@@ -319,8 +319,8 @@ LRESULT CALLBACK ProgramMenu::window_proc(
 LRESULT ProgramMenu::handle(
 	HWND window, UINT message, WPARAM wparam, LPARAM lparam)
 {
-	// ImGui has to see the input before anything else does, and it says so
-	// by claiming the message.
+	// ImGui must see the input before anything else, and it says that it
+	// used a message by claiming it.
 	if (m_imgui_ready
 		&& ImGui_ImplWin32_WndProcHandler(window, message, wparam, lparam))
 	{
@@ -329,8 +329,8 @@ LRESULT ProgramMenu::handle(
 
 	switch (message) {
 	case WM_HOTKEY:
-		// The same combination puts it away again, so a menu opened by
-		// mistake costs one keystroke rather than a reach for the mouse.
+		// The same combination closes it again, so a menu opened by
+		// mistake costs one keystroke and not a reach for the mouse.
 		if (HOTKEY_ID == static_cast<int>(wparam)) {
 			if (m_visible) conceal(); else reveal();
 		}
@@ -347,21 +347,21 @@ LRESULT ProgramMenu::handle(
 		return 0;
 
 	case WM_ACTIVATE:
-		// Clicking anything else means the menu was not what was wanted.
-		// Only once it is really on screen: the frames that measure it are
-		// drawn hidden, and those must not be taken for a dismissal.
+		// A click anywhere else means the menu was not wanted. This counts
+		// only once the menu is really on screen: the frames that measure
+		// it are drawn hidden, and those must not close it.
 		if (WA_INACTIVE == LOWORD(wparam) && m_shown) conceal();
 		return 0;
 
 	case WM_CLOSE:
-		// Asked to shut down. The window itself is destroyed by demolish()
-		// once the loop has ended, on this same thread.
+		// Asked to shut down. demolish() destroys the window itself after
+		// the loop ends, on this same thread.
 		PostQuitMessage(0);
 		return 0;
 
 	case WM_DPICHANGED:
-		// Dragged onto a different display, or the display was rescaled.
-		// The next frame will size and place the window afresh.
+		// Dragged onto another display, or the display was rescaled. The
+		// next frame sizes and places the window again.
 		m_dpi = HIWORD(wparam);
 		apply_style(scale());
 		m_height = 0;
@@ -380,8 +380,8 @@ void ProgramMenu::reveal()
 	m_shown   = false;
 	m_height  = 0;   // unknown until something has been drawn
 
-	// Put it where it will appear before asking how big anything is, so
-	// the dpi that gets used is the one of the monitor it lands on.
+	// Place it where it will appear before asking how big anything is, so
+	// the dpi used is the one of the monitor it lands on.
 	place(
 		static_cast<int>(WIDTH * scale() + 0.5f),
 		static_cast<int>(ROW_HEIGHT * scale() + 0.5f)
@@ -407,16 +407,16 @@ void ProgramMenu::place(int width, int height)
 
 	const HWND anchor = m_hooks.anchor ? m_hooks.anchor() : nullptr;
 	if (anchor && IsWindow(anchor) && !IsIconic(anchor)) {
-		// The frame bounds, not the window rectangle: the same measurement
-		// clicks are aimed with, so the menu sits over what it looks like
-		// it sits over.
+		// The frame bounds, not the window rectangle. That is the same
+		// measurement clicks are aimed with, so the menu sits exactly where
+		// it looks like it sits.
 		anchored = SUCCEEDED(DwmGetWindowAttribute(
 			anchor, DWMWA_EXTENDED_FRAME_BOUNDS, &over, sizeof(over)
 		));
 	}
 	if (!anchored) {
-		// Nothing to appear over. The monitor the mouse is on is where
-		// somebody who just pressed a hotkey is looking.
+		// Nothing to appear over. Somebody who just pressed a hotkey is
+		// looking at the monitor the mouse is on.
 		POINT cursor {};
 		GetCursorPos(&cursor);
 		over = work_area_at(cursor);
@@ -425,8 +425,8 @@ void ProgramMenu::place(int width, int height)
 	int left = over.left + (over.right  - over.left - width)  / 2;
 	int top  = over.top  + (over.bottom - over.top  - height) / 2;
 
-	// A game window can hang off the edge of the desktop, or be larger
-	// than the display it is on; the menu must not follow it out there.
+	// A game window can hang over the edge of the desktop, or be larger than
+	// the display it is on. The menu must not follow it out there.
 	const POINT middle {left + width / 2, top + height / 2};
 	const RECT  screen = work_area_at(middle);
 	left = std::clamp(left, static_cast<int>(screen.left),
@@ -453,7 +453,7 @@ void ProgramMenu::apply_style(float scale)
 	style.ItemSpacing      = ImVec2 {6.0f, 6.0f};
 
 	style.ScaleAllSizes(scale);
-	// Sizes and fonts scale separately since 1.92; both want the dpi.
+	// Since 1.92 sizes and fonts scale separately, and both need the dpi.
 	style.FontScaleMain = scale;
 }
 
@@ -477,8 +477,8 @@ void ProgramMenu::draw()
 	size_t chosen     {NOT_CHOSEN};
 	bool   stop_asked {false};
 
-	// One at a time is the runner's rule, so there is nothing to choose
-	// between while something is in flight - only whether to stop it.
+	// The runner allows only one program at a time, so while one runs there
+	// is nothing to choose between: the only question is whether to stop it.
 	const std::string busy =
 		m_hooks.running ? m_hooks.running() : std::string {};
 	if (busy.empty()) {
@@ -544,8 +544,8 @@ void ProgramMenu::draw()
 		return;
 	}
 
-	// The window is made to fit what was just drawn, and only put on
-	// screen once it does - a pop-up seen resizing itself looks broken.
+	// The window is sized to fit what was just drawn, and is shown only
+	// after it fits. A pop-up seen resizing itself looks broken.
 	const int height = static_cast<int>(wanted + 0.5f);
 	if (height > 0 && height != m_height) {
 		m_height = height;

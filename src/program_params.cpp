@@ -83,8 +83,8 @@ bool ProgramParams::load_file(const std::wstring& path, std::string& error)
 
 		Values values;
 		for (auto item = entry.begin(); item != entry.end(); ++item) {
-			// NAME identifies the entry and COMMENT is for humans; neither
-			// is a parameter any program should see.
+			// NAME names the entry and COMMENT is for people. Neither is a
+			// parameter that any program should see.
 			if (KEY_NAME == item.key() || KEY_COMMENT == item.key())
 				continue;
 
@@ -130,8 +130,8 @@ std::vector<std::string> ProgramParams::keys(const std::string& program) const
 	const auto values = m_programs.find(program);
 	if (m_programs.end() == values) return found;
 
-	// NAME and COMMENT were dropped as the file was read, so whatever is
-	// left was meant to tune something.
+	// NAME and COMMENT were dropped while the file was read, so whatever is
+	// left was meant to change something.
 	for (const auto& number : values->second.numbers)
 		found.push_back(number.first);
 	for (const auto& text : values->second.texts)

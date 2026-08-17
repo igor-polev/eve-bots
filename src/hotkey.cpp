@@ -22,16 +22,16 @@ const Named MODIFIER_NAMES[] = {
 	{"win",   MOD_WIN},     {"windows", MOD_WIN},
 };
 
-// Modifiers in the order hotkey_text spells them, which is the order
+// Modifiers in the order hotkey_text prints them, which is the order
 // people write them in.
 const Named MODIFIER_ORDER[] = {
 	{"Ctrl", MOD_CONTROL}, {"Alt", MOD_ALT},
 	{"Shift", MOD_SHIFT},  {"Win", MOD_WIN},
 };
 
-// The first spelling of each key is the one hotkey_text hands back; the rest
-// are alternatives it accepts. The punctuation keys are OEM codes, which name
-// a position on the keyboard rather than a character.
+// The first spelling of each key is the one hotkey_text gives back. The rest
+// are other spellings it accepts. The punctuation keys are OEM codes, which
+// name a place on the keyboard and not a character.
 const Named KEY_NAMES[] = {
 	{"`", VK_OEM_3}, {"backquote", VK_OEM_3}, {"grave", VK_OEM_3},
 	{"tilde", VK_OEM_3},
@@ -71,9 +71,9 @@ std::string trimmed(const std::string& text)
 	return text.substr(first, text.find_last_not_of(" \t") - first + 1);
 }
 
-// "Ctrl + Alt + E" -> the three pieces, spaces gone. Empty pieces are
-// kept, so "Ctrl+" is caught as a hotkey with no key rather than read as
-// a bare "Ctrl".
+// "Ctrl + Alt + E" gives the three parts without spaces. Empty parts are
+// kept, so "Ctrl+" is caught as a hotkey with no key instead of being read
+// as a plain "Ctrl".
 std::vector<std::string> split_plus(const std::string& text)
 {
 	std::vector<std::string> pieces;
@@ -89,9 +89,9 @@ std::vector<std::string> split_plus(const std::string& text)
 	}
 }
 
-// Whether a lone press of this key would otherwise have typed something.
-// Those need a modifier: a hotkey is registered system wide, so claiming
-// bare 'E' would take the letter away from every application there is.
+// Whether pressing this key alone would type something. Such keys need a
+// modifier: a hotkey is registered for the whole system, so taking a plain
+// 'E' would take that letter away from every application.
 bool prints_something(UINT key)
 {
 	if (key >= 'A' && key <= 'Z') return true;
@@ -109,7 +109,8 @@ bool prints_something(UINT key)
 	}
 }
 
-// A whole-token unsigned number, for the tail of "f12" and "numpad3".
+// A whole word that is an unsigned number, for the end of "f12" and
+// "numpad3".
 bool parse_index(const std::string& text, unsigned& value)
 {
 	if (text.empty()) return false;
@@ -128,11 +129,11 @@ UINT key_code(const std::string& name)
 {
 	if (1 == name.size()) {
 		const unsigned char single = static_cast<unsigned char>(name[0]);
-		// Letters and digits are their own virtual key codes, upper case.
+		// Letters and digits are their own virtual key codes, in upper case.
 		if (std::isalnum(single))
 			return static_cast<UINT>(::toupper(single));
 	}
-	// F1..F24 and numpad0..numpad9 are runs, not worth a table each.
+	// F1..F24 and numpad0..numpad9 are ranges, so they need no table.
 	unsigned index {0};
 	if ('f' == name[0] && parse_index(name.substr(1), index)
 		&& index >= 1 && index <= 24)
@@ -170,7 +171,7 @@ std::string key_name(UINT key)
 bool parse_hotkey(const std::string& text, Hotkey& key, std::string& error)
 {
 	key = Hotkey {};
-	// Not a mistake, and not a hotkey either: the menu is simply off.
+	// Not a mistake, and not a hotkey either: the menu is just off.
 	if (trimmed(text).empty()) return true;
 
 	const std::vector<std::string> pieces = split_plus(text);
@@ -182,8 +183,8 @@ bool parse_hotkey(const std::string& text, Hotkey& key, std::string& error)
 			return false;
 		}
 
-		// Everything before the last piece must be a modifier, and the last
-		// piece must be the key - "Alt+Ctrl" names no key at all.
+		// Every part before the last must be a modifier, and the last part
+		// must be the key. "Alt+Ctrl" names no key at all.
 		const bool last = (i + 1 == pieces.size());
 		if (!last) {
 			UINT modifier {0};
@@ -212,8 +213,8 @@ bool parse_hotkey(const std::string& text, Hotkey& key, std::string& error)
 		}
 	}
 
-	// A bare printing key would be taken away from every other application
-	// on the desktop, which is never what somebody meant to ask for.
+	// A printing key on its own would be taken away from every other
+	// application on the desktop, which nobody ever means to ask for.
 	if (0 == parsed.modifiers && prints_something(parsed.key)) {
 		error = "'" + text + "' needs a modifier: registering it on its own "
 		        "would take the key away from every other application. Try "

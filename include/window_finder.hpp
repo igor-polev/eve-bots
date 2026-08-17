@@ -19,27 +19,27 @@ struct WindowInfo {
 };
 
 // How to recognise an EVE client window. Both fields come from the config
-// file; matching is case insensitive, an empty field is simply skipped,
-// and whatever is left has to hold all at once - neither test alone is
-// enough to tell a client from everything else on the desktop.
+// file. Matching ignores case, an empty field is skipped, and every field
+// that is left must match at the same time. One test alone cannot tell a
+// client from everything else on the desktop.
 struct EveWindowMatch {
 	std::wstring class_name;   // window class: the launcher shares it
 	std::wstring title_prefix; // title prefix: any window may claim it
 };
 
-// All visible, non-cloaked top-level windows that have a title.
+// All visible, non-cloaked top level windows that have a title.
 std::vector<WindowInfo> find_all_windows();
 
-// Subset of the above that matches the given criteria.
+// The windows from the list above that match the given rules.
 std::vector<WindowInfo> find_eve_windows(const EveWindowMatch& match);
 
-// True if the window matches the given criteria.
+// True when the window matches the given rules.
 bool is_eve_window(const WindowInfo& info, const EveWindowMatch& match);
 
-// Who is logged in, taken from the window title: EVE puts the character
-// name after the configured prefix, as in "EVE - Jane Doe". A title that
-// does not start with the prefix is returned whole - it still tells one
-// client from another, which is all this is used for.
+// Who is logged in, taken from the window title. EVE puts the character
+// name after the prefix from the config file, as in "EVE - Jane Doe". A
+// title that does not start with the prefix is returned whole: it still
+// tells one client from another, and that is all this is used for.
 std::wstring eve_character_name(
 	const std::wstring& title, const std::wstring& prefix
 );

@@ -45,8 +45,8 @@ bool write_png(const Frame& frame, const std::wstring& path, std::string& error)
 		winrt::check_hresult(wic_frame->Initialize(nullptr));
 		winrt::check_hresult(wic_frame->SetSize(frame.width, frame.height));
 
-		// The encoder may not honour the requested format; it reports back
-		// what it will actually use, which we must then match.
+		// The encoder may not accept the format we ask for. It reports back
+		// the format it will use, and we must then match it.
 		WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
 		winrt::check_hresult(wic_frame->SetPixelFormat(&format));
 		if (!IsEqualGUID(format, GUID_WICPixelFormat32bppBGRA)) {
@@ -54,7 +54,7 @@ bool write_png(const Frame& frame, const std::wstring& path, std::string& error)
 			return false;
 		}
 
-		// WritePixels takes a non-const buffer, so hand it a copy.
+		// WritePixels takes a buffer that is not const, so give it a copy.
 		std::vector<uint8_t> pixels {frame.pixels};
 		winrt::check_hresult(wic_frame->WritePixels(
 			frame.height,

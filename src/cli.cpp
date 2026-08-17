@@ -107,8 +107,8 @@ std::string to_lower(std::string text)
 	return text;
 }
 
-// Whole-token integer: "12ab" is not a number, so a mistyped option cannot
-// be silently taken for one.
+// The whole word must be a number: "12ab" is not one, so a mistyped option
+// cannot be read as a number by mistake.
 bool parse_int(const std::string& text, int& value)
 {
 	try {
@@ -123,8 +123,8 @@ bool parse_int(const std::string& text, int& value)
 	}
 }
 
-// Certainties are only meaningful to two or three digits, and formatting
-// them here keeps std::cout's flags untouched.
+// Certainties mean little past two or three digits. Formatting them here
+// also leaves the flags of std::cout alone.
 std::string certainty_text(double value)
 {
 	std::ostringstream text;
@@ -132,8 +132,8 @@ std::string certainty_text(double value)
 	return text.str();
 }
 
-// "1214,346", or "1214,?" when only one coordinate is known - which is
-// what the position cache hands back for a pattern that holds still along
+// "1214,346", or "1214,?" when only one coordinate is known. That is what
+// the position cache gives back for a pattern that stays in place along
 // one axis only.
 std::string corner_text(const cv::Point& corner)
 {
@@ -144,7 +144,7 @@ std::string corner_text(const cv::Point& corner)
 	return axis(corner.x) + "," + axis(corner.y);
 }
 
-// "a 302x88 box at 3113,300" - where a search actually looked.
+// "a 302x88 box at 3113,300": where a search really looked.
 std::string box_text(const cv::Rect& box)
 {
 	std::ostringstream text;
@@ -153,8 +153,8 @@ std::string box_text(const cv::Rect& box)
 	return text.str();
 }
 
-// Where one pattern's share of a search looked, as a phrase to follow
-// "searched" or "looked for 'x' in".
+// Where one pattern's share of a search looked. It reads on after
+// "searched" or after "looked for 'x' in".
 std::string scope_text(const PatternSearch& part)
 {
 	switch (part.scope) {
@@ -169,9 +169,9 @@ std::string scope_text(const PatternSearch& part)
 	}
 }
 
-// "2 candidates were something similar", empty when none were. Worth
-// saying out loud: those are the difference between "not there" and
-// "not recognised".
+// "2 candidates were something similar", empty when there were none. It
+// is worth printing: this is the difference between "not there" and "not
+// recognised".
 std::string mistaken_text(int mistaken)
 {
 	if (mistaken <= 0) return {};
@@ -180,8 +180,8 @@ std::string mistaken_text(int mistaken)
 	     + " something similar";
 }
 
-// "gate,station" -> the two names. Empty pieces are dropped, so a trailing
-// comma is not an error.
+// "gate,station" gives the two names. Empty parts are dropped, so a comma
+// at the end is not an error.
 std::vector<std::string> split_commas(const std::string& list)
 {
 	std::vector<std::string> pieces;
@@ -236,17 +236,17 @@ int Cli::run()
 	while (true) {
 		std::cout << "eve> " << std::flush;
 		if (!std::getline(std::cin, line)) {
-			// stdin closed (piped input or Ctrl+Z) - quit cleanly
+			// stdin is closed (piped input or Ctrl+Z), so quit cleanly
 			std::cout << "\n";
 			break;
 		}
 		if (!dispatch(line)) break;
 	}
-	// Before the programs, so nothing can be started from the menu while
-	// the rest of this is taking itself apart.
+	// Before the programs, so that nothing can be started from the menu while
+	// the rest of this is shutting down.
 	m_menu.stop();
-	// A program still working would keep using the detector and the
-	// capture we are about to shut down.
+	// A program that is still working would keep using the detector and the
+	// capture that we are about to shut down.
 	if (m_programs.running()) {
 		std::cout << "Waiting for '" << m_programs.current()
 		          << "' to stop...\n";
@@ -336,7 +336,7 @@ void Cli::cmd_start(const std::vector<std::string>& args)
 		std::cout << "Capture is already running; use 'stop' first.\n";
 		return;
 	}
-	// a bare 'start' works without a preceding 'find'
+	// a plain 'start' works without a 'find' before it
 	if (m_windows.empty())
 		m_windows = find_eve_windows(m_settings.eve_window());
 
@@ -353,7 +353,7 @@ void Cli::cmd_start(const std::vector<std::string>& args)
 			print_windows();
 			return;
 		}
-		// exactly one window - no selection needed
+		// exactly one window, so there is nothing to choose
 	} else {
 		try {
 			const int parsed = std::stoi(args[0]);
@@ -384,9 +384,9 @@ void Cli::cmd_start(const std::vector<std::string>& args)
 
 void Cli::follow_positions(const WindowInfo& target)
 {
-	// Cached positions belong to a frame size, so the frame itself has to
-	// say what that is - the window has several plausible rectangles and
-	// only one of them is what detections are measured in.
+	// Cached positions belong to a frame size, so the frame itself must say
+	// what that size is. The window has several rectangles, and only one of
+	// them is the one detections are measured in.
 	Frame frame;
 	m_capture.frame(frame);
 	if (frame.empty()) {
@@ -442,8 +442,8 @@ void Cli::cmd_status()
 			std::cout << "Last frame: "
 			          << frame.width << "x" << frame.height << "\n";
 	}
-	// The cache is written by whichever thread searched, which has no polite
-	// way to interrupt the console, so this is where trouble with it shows.
+	// The cache is written by the thread that searched, and that thread
+	// cannot interrupt the console, so its errors are shown here.
 	std::cout << "Positions: " << m_positions.state_text() << "\n";
 	std::cout << "Menu: "
 	          << (m_menu.running()
@@ -517,8 +517,8 @@ void Cli::cmd_images() const
 
 size_t Cli::resolve_image(const std::string& token) const
 {
-	// 'images' lists patterns with their index, so take either that or the
-	// name - the same as 'start <n>' after a 'find'.
+	// 'images' lists patterns with their index, so take either the index or
+	// the name. This is the same as 'start <n>' after a 'find'.
 	int typed {0};
 	if (parse_int(token, typed)) {
 		if (typed >= 0 && static_cast<size_t>(typed) < m_images.size())
@@ -545,8 +545,8 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 		return;
 	}
 
-	// A comma separated list means any of them will do: one search, and
-	// every match reported may have come from any pattern in the list.
+	// A list separated by commas means any of them will do. It is one
+	// search, and every match reported may come from any pattern in the list.
 	eb::Images images;
 	for (const std::string& token : split_commas(args[0])) {
 		const size_t image = resolve_image(token);
@@ -563,8 +563,8 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 		return;
 	}
 
-	// The scope may sit on either side of the count, so pick it out first and
-	// read whatever is left as the number of matches.
+	// The scope may stand before or after the count, so take it out first and
+	// read what is left as the number of matches.
 	int         max_hits {1};
 	SearchScope scope {SearchScope::BOX_THEN_FULL};
 	for (size_t i = 1; i < args.size(); ++i) {
@@ -602,12 +602,12 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 	}
 	const eb::Millis spent = eb::since(started);
 
-	// With one pattern it all fits on the summary line; with several, each
-	// was looked for in its own way and gets a line of its own below.
+	// With one pattern everything fits on the summary line. With several,
+	// each was looked for in its own way and gets its own line below.
 	std::string where, mistaken;
 	if (!several) {
-		// A remembered answer searched nothing at all this time round, so
-		// the scope belongs to the search that first produced it.
+		// A remembered answer searched nothing this time, so the scope
+		// belongs to the search that first made it.
 		where = (found.remembered ? ", remembered from " : ", searched ")
 		      + scope_text(found.searched.front());
 		const std::string claimed =
@@ -640,8 +640,8 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 	for (const PatternSearch& part : found.searched) {
 		const std::string name = m_images(part.image).name;
 		// A pattern the search never reached is not a pattern that was not
-		// there: any one of them was all that was asked for, and one of the
-		// others answered before this one cost anything.
+		// there. Any one of them was enough, and another one answered
+		// before this one cost anything.
 		if (SearchScope::NONE == part.scope) {
 			std::cout << "  did not look for '" << name
 			          << "': another pattern answered first\n";
@@ -687,8 +687,8 @@ void Cli::autostart_capture()
 		std::cout << "Several EVE windows are open:\n";
 		print_windows();
 		// The only question the application ever asks. Anything that is
-		// not one of the numbers leaves the capture stopped, which is
-		// where 'start' picks up.
+		// not one of the numbers leaves capture stopped, and then 'start'
+		// takes over.
 		std::cout << "Which one to capture (Enter for none)? " << std::flush;
 		std::string line;
 		if (!std::getline(std::cin, line)) return;
@@ -717,9 +717,9 @@ void Cli::load_menu()
 		return;
 	}
 
-	// Only what SHOW_IN_MENU asked for. Most programs are steps other
-	// programs are built out of, and a menu of those is a menu of ways to
-	// leave a ship half way through something.
+	// Only the programs with SHOW_IN_MENU. Most programs are steps of other
+	// programs, and a menu of those is a menu of ways to leave a ship half
+	// way through something.
 	m_menu_programs.clear();
 	for (size_t i = 0; i < m_programs.size(); ++i)
 		if (m_programs(i).in_menu()) m_menu_programs.push_back(i);
@@ -729,9 +729,9 @@ void Cli::load_menu()
 		return;
 	}
 
-	// The menu asks the same questions 'programs', 'run' and 'abort'
-	// answer, and gets them answered the same way - it is another way in,
-	// not another set of rules.
+	// The menu asks the same questions as 'programs', 'run' and 'abort',
+	// and gets the same answers. It is another way in, not another set of
+	// rules.
 	MenuHooks hooks;
 	hooks.programs = [this] {
 		std::vector<std::string> names;
@@ -746,9 +746,9 @@ void Cli::load_menu()
 			start_from_menu(m_menu_programs[entry]);
 	};
 	hooks.abort   = [this] { abort_from_menu(); };
-	// Whatever is being captured is what a program would act on, so that
-	// is what the menu should appear over. Nothing while capture is
-	// stopped, even though the handle outlives it.
+	// A program acts on the captured window, so the menu should appear
+	// over that window. Nothing while capture is stopped, even though the
+	// handle still exists.
 	hooks.anchor  = [this] {
 		return m_capture.running() ? m_capture.target() : nullptr;
 	};
@@ -811,8 +811,8 @@ void Cli::report_program(const std::string& name, const ProgramResult& result)
 
 void Cli::print_note(const std::string& text) const
 {
-	// This runs on somebody else's thread, so the console is most likely
-	// sitting at a prompt: start on a fresh line and put the prompt back.
+	// This runs on another thread, so the console is most likely waiting at
+	// a prompt. Start on a new line and print the prompt again.
 	std::cout << "\n" << text << "\neve> " << std::flush;
 }
 
@@ -846,9 +846,9 @@ void Cli::cmd_run(const std::vector<std::string>& args)
 		cmd_programs();
 		return;
 	}
-	// The name is checked before the runner is, so that a typo is reported
-	// as a typo rather than as whatever else happens to be going on.
-	// Same addressing as images: a name, or the index 'programs' prints.
+	// The name is checked before the runner, so that a typo is reported as a
+	// typo and not as whatever else is going on. Programs are addressed like
+	// images: by name, or by the index that 'programs' prints.
 	size_t program = ProgramRunner::NOT_FOUND;
 	int    typed {0};
 	if (parse_int(args[0], typed)) {
@@ -904,9 +904,9 @@ void Cli::cmd_click(const std::vector<std::string>& args)
 		return;
 	}
 
-	// Two numbers in a row mean a bare point; anything else names an image.
-	// A single number is an image index, so 'click 1' and 'click 1 2' do
-	// different things - deliberately, since both readings are useful.
+	// Two numbers in a row mean a plain point. Anything else names an image.
+	// One number alone is an image index, so 'click 1' and 'click 1 2' do
+	// different things. That is on purpose, because both are useful.
 	int    x {0}, y {0};
 	bool   point {false};
 	size_t first_option {1};
@@ -950,10 +950,10 @@ void Cli::cmd_click(const std::vector<std::string>& args)
 		const ImagePattern& pattern = m_images(image);
 		cv::Point           corner  = m_images.last_hit(image);
 
-		// 'refresh' asks for a search outright; without it one happens only
-		// when there is nothing to aim at. Half a corner - all the position
-		// cache keeps for a pattern fixed along one axis - is not enough:
-		// the other coordinate has to be found before anything is clicked.
+		// 'refresh' always asks for a search. Without it, a search happens
+		// only when there is nothing to aim at. Half a corner is not enough,
+		// and half is all the position cache keeps for a pattern fixed along
+		// one axis. The other coordinate must be found before any click.
 		if (refresh || !ImageLibrary::located(corner)) {
 			if (!find && !refresh) {
 				std::cout << "'" << pattern.name << "' has not been detected "

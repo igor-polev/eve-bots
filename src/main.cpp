@@ -24,17 +24,18 @@ int main()
 {
 	// window titles are printed as UTF-8
 	SetConsoleOutputCP(CP_UTF8);
-	// Clicks are aimed using window geometry, and Windows silently scales
+	// Clicks are aimed with window geometry, and Windows quietly scales
 	// every such measurement for a process that has not said it understands
-	// DPI. On a display at anything but 100% the coordinates would be off.
+	// DPI. On a display at anything but 100% the coordinates would be wrong.
 	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-	// OpenCV reports every optional parallel backend it fails to load the
-	// first time it is used; the console is our user interface, keep it quiet
+	// The first time it is used, OpenCV reports every optional parallel
+	// backend it could not load. The console is our user interface, so keep
+	// it quiet
 	cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_WARNING);
 
 	try {
-		// multi-threaded apartment: capture is WinRT, and it is pulled from
-		// whichever thread asks for a frame
+		// multi-threaded apartment: capture is WinRT, and any thread may ask
+		// it for a frame
 		winrt::init_apartment(winrt::apartment_type::multi_threaded);
 
 		Settings settings;
@@ -53,12 +54,12 @@ int main()
 			std::cerr << "   [ERROR] " << error << std::endl;
 			return -1;
 		}
-		// Put right rather than fatal, but the file should still be fixed.
+		// Worked around and not fatal, but the file should still be fixed.
 		for (const std::string& warning : images.warnings())
 			std::cout << " [WARNING] " << warning << "\n";
 
-		// Programs carry their own defaults, so this file only overrides
-		// them: missing is a note, broken is fatal.
+		// Programs carry their own default values, so this file only overrides
+		// them. A missing file is a note. A broken one is fatal.
 		ProgramParams params;
 		if (!params.load(error)) {
 			std::cerr << "   [ERROR] " << error << std::endl;
@@ -70,10 +71,10 @@ int main()
 			             "defaults.\n";
 		}
 
-		// Where patterns were last seen, kept beside the settings file so it
-		// lands wherever the bot was installed. This one is written by us
-		// and regenerates itself, so a broken one is worth a word but not a
-		// refusal to start.
+		// Where patterns were last seen. It is kept next to the settings file,
+		// so it lands where the bot was installed. We write this file
+		// ourselves and it fills up again on its own, so a broken one is worth
+		// a warning but not a refusal to start.
 		PositionCache positions;
 		if (!positions.load(
 				join_path(
