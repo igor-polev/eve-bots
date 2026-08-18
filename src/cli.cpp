@@ -377,7 +377,7 @@ void Cli::follow_positions(const WindowInfo& target)
 	// what that size is. The window has several rectangles, and only one of
 	// them is the one detections are measured in.
 	Frame frame;
-	m_capture.frame(frame);
+	m_capture.new_frame(frame);
 	if (frame.empty()) {
 		std::cout << " [WARNING] No frame yet, so positions cannot be "
 		             "restored or remembered; 'stop' and 'start' again once "
@@ -420,7 +420,7 @@ void Cli::cmd_status()
 		std::cout << "Capture: stopped.\n";
 	} else {
 		Frame frame;
-		m_capture.frame(frame);
+		m_capture.new_frame(frame);
 		std::cout << "Capture: running at " << m_capture.frame_rate()
 		          << " fps, " << m_capture.frame_count()
 		          << " frames grabbed (" << m_capture.arrived_count()
@@ -448,7 +448,7 @@ void Cli::cmd_dump(const std::vector<std::string>& args)
 		return;
 	}
 	Frame frame;
-	m_capture.frame(frame);
+	m_capture.new_frame(frame);
 	if (frame.empty()) {
 		std::cout << "No frame captured yet - is the window minimised?\n";
 		return;

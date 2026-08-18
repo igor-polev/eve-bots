@@ -36,46 +36,37 @@ class ImageDetector {
 public:
 	// ---- what a search is asked for, and what it comes to ----------------
 
-	// What a request asks for: BOX looks only around the remembered
-	// position, FULL looks at the whole frame, BOX_THEN_FULL tries the box
-	// and then the frame. NONE is never a request, only an answer: the
-	// pattern was not looked for, because another one was found first.
 	enum class SearchScope {
 		NONE,
 		FULL,
 		BOX,
 		BOX_THEN_FULL
 	};
-
-	struct DetectionHit {
-		size_t    image {0};       // which pattern matched, by library index
-		cv::Point at;              // top left corner, in frame pixels
-		double    certainty {0.0}; // 0..1, how well the shape matched
-		double    fit {0.0};       // 0..1 RMS pixel difference, lower is closer
-	};
-
-	// What was done for one pattern in a search. Each pattern keeps its
-	// place along its own axes, so each has its own box, or none.
 	struct PatternSearch {
 		size_t      image {0};
-		SearchScope scope {SearchScope::NONE}; // where this one was looked for
-		cv::Rect    box;  // the quick box, empty unless scope names one
+		SearchScope scope {SearchScope::NONE};
+		cv::Rect    box   {};
 	};
-
+	struct DetectionHit {
+		size_t    image     {0};   // which pattern matched, by library index
+		cv::Point at        {};    // top left corner, in frame pixels
+		double    certainty {0.0}, // 0..1 how well the shape matched
+		          fit       {0.0}; // 0..1 RMS pixel difference, lower is closer
+	};
 	struct Detection {
-		std::vector<DetectionHit>  hits;
-		std::vector<PatternSearch> searched;
-		bool remembered {false};
+		std::vector<DetectionHit>  hits       {};
+		std::vector<PatternSearch> searched   {};
+		bool                       remembered {false};
 	};
 
-	// All three must live longer than the detector. The library is not
-	// const: a search that finds a pattern writes down where it was, and
-	// that is what makes the next search quick.
 	ImageDetector(
 		ImageLibrary&  library,
 		ScreenCapture& capture,
-		PositionCache& cache
-	);
+		PositionCache& cache)
+		: m_library {library}
+		, m_capture {capture}
+		, m_cache   {cache}
+	{}
 	ImageDetector(const ImageDetector&)            = delete;
 	ImageDetector& operator=(const ImageDetector&) = delete;
 
@@ -145,21 +136,14 @@ private:
 	// that pattern together with others.
 	struct Remembered {
 		size_t      image {0};
-		// The room this one pattern was given, which is what was left of
-		// the count of the request that made it, not the count itself.
-		int         max_hits {0};
-		// The area really searched, BOX or FULL. The name of the request
-		// does not matter later. Only where the pixels were looked at
-		// decides what the answer can still be used for.
-		SearchScope scope {SearchScope::NONE};
+		int         max_hits {0}; // The room this one pattern was given, not the count itself.
+		SearchScope scope {SearchScope::NONE}; // The area really searched, BOX or FULL.
 		// The same again in the form the console prints, so that an answer
 		// handed back can say which search made it.
 		PatternSearch             searched;
 		std::vector<DetectionHit> hits;
 
-		// True when the search stopped because no candidate was left, not
-		// because it ran out of room. Then nothing above the threshold was
-		// left unreported.
+		// True when the search stopped because no candidate was left.
 		bool exhaustive() const noexcept
 			{ return hits.size() < static_cast<size_t>(max_hits); }
 
@@ -178,14 +162,10 @@ private:
 		}
 	};
 
-	// Best match first, from whichever pattern it came, and no more hits
-	// than were asked for.
-	static void rank_hits(std::vector<DetectionHit>& hits, int max_hits);
-
-	// Searches one rectangle of the BGRA frame for one pattern, taking at
-	// most room hits. They come back in frame coordinates, best match
-	// first, and replace what was in the vector. Converts what it needs
-	// into m_scene first, so it is not const.
+	static void rank_hits(
+		std::vector<DetectionHit>& hits,
+		int                        max_hits
+	);
 	void search_area(
 		const cv::Mat&             captured,
 		const cv::Rect&            area,
@@ -193,47 +173,27 @@ private:
 		int                        room,
 		std::vector<DetectionHit>& hits
 	);
-
-	// How close this pattern comes to the best position in a window of the
-	// scene, as a root mean square pixel difference on the images' own 0..1
-	// scale. The mask normalises it, so patterns of different sizes can
-	// still be compared. WORST_FIT when the pattern does not fit in the
-	// window.
 	double best_fit(
-		const cv::Mat&      scene,
-		const cv::Rect&     window,
-		const ImagePattern& pattern
+		const cv::Mat&             scene,
+		const cv::Rect&            window,
+		const ImagePattern&        pattern
 	) const;
-
-	// The box a quick search covers: the pattern at its remembered corner,
-	// grown by a margin along each fixed direction, and the whole frame
-	// along the directions that are not fixed.
 	cv::Rect quick_box(
-		const ImagePattern& pattern,
-		const cv::Point&    last,
-		const cv::Rect&     frame
+		const ImagePattern&        pattern,
+		const cv::Point&           last,
+		const cv::Rect&            frame
 	) const;
 
-	ImageLibrary&  m_library;
-	ScreenCapture& m_capture;
-	PositionCache& m_cache;
+	ImageLibrary&           m_library;
+	ScreenCapture&          m_capture;
+	PositionCache&          m_cache;
 
-	std::mutex m_mutex;  // one caller at a time, and guards everything below
-
-	Frame m_frame;
-	// The same frame as float BGR, which is what matching needs. It is the
-	// size of the whole frame, so a point in it is a point in the frame, but
-	// only m_converted holds real pixels. That rectangle grows as searches
-	// ask for areas, and a new frame makes all of it stale. Converting is
-	// what a search of a small box would otherwise spend most of its time
-	// on, so nothing is converted twice while the frame lasts.
-	cv::Mat  m_scene;
-	cv::Rect m_converted;
-	// Every search already made in m_frame. Entries are only added and read,
-	// and the whole list is dropped when the frame changes. A vector suits
-	// that: one block to scan, one allocation to grow, and clear() keeps the
-	// buffer for the next frame.
+	Frame                   m_frame;
+	cv::Mat                 m_scene;
+	cv::Rect                m_converted;
 	std::vector<Remembered> m_memo;
+
+	std::mutex              m_mutex;
 };
 
 namespace eb {

@@ -61,7 +61,7 @@ public:
 	// replaced. False means `into` already held the current frame and was
 	// left alone, which saves copying every pixel. `into` stays empty while
 	// nothing has been captured at all.
-	bool frame(Frame& into);
+	bool new_frame(Frame& into);
 
 private:
 	// Two buffers are enough: only the newest frame is ever used.

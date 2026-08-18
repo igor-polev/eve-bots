@@ -12,24 +12,11 @@
 
 #include "image_detector.hpp"
 
-namespace {
-
-// Span of a quick search along one axis. Defined at the end of the file.
-void quick_span(int at, int size, int margin, int limit, int& start, int& length);
-
-} // namespace
-
-ImageDetector::ImageDetector(
-	ImageLibrary& library, ScreenCapture& capture, PositionCache& cache)
-	: m_library {library}, m_capture {capture}, m_cache {cache}
-{
-}
-
 bool ImageDetector::detect(
 	const eb::Images& images,
 	Detection&        result,
 	std::string&      error,
-	eb::Scope       scope,
+	eb::Scope         scope,
 	int               max_hits)
 {
 	// FUTURE: optimize multi-thread sync for multiple EVE clients monitoring
@@ -52,7 +39,7 @@ bool ImageDetector::detect(
 	// A frame we have not seen before makes every kept answer useless, and
 	// every converted pixel with it: both were about pixels that are gone.
 	// While capture hands back the same frame, the kept answers still hold.
-	if (m_capture.frame(m_frame)) {
+	if (m_capture.new_frame(m_frame)) {
 		m_memo.clear();
 		m_converted = cv::Rect {};
 	}
@@ -178,25 +165,23 @@ bool ImageDetector::detect(
 	try {
 		// One pattern's share of the work, in whatever area it is looked for.
 		const auto look = [&](size_t at, const cv::Rect& area) {
-			PatternSearch& part = result.searched[at];
-			search_area(captured, area, part.image, budget[at], found[at]);
+			const size_t pattern {images[at]};
+			search_area(captured, area, pattern, budget[at], found[at]);
 			if (found[at].empty()) return;
 
 			// Writing down where it was found is what makes the next search
 			// quick. A position that did not move is not sent to the cache.
 			const cv::Point corner = found[at].front().at;
-			if (m_library.set_last_hit(part.image, corner))
-				m_cache.store(m_library(part.image), corner);
+			if (m_library.set_last_hit(pattern, corner))
+				m_cache.store(m_library(pattern), corner);
 		};
 
 		// All boxes before any whole frame search: one pattern that moved
 		// must not cost the others their quick search.
 		for (size_t at = 0; at < images.size(); ++at) {
 			if (room <= 0) break;
-			// A remembered part keeps the box of the search that made it.
-			// That is not a reason to search it again.
-			if (known[at]) continue;
-			if (eb::Scope::BOX != result.searched[at].scope) continue;
+			if (known[at] || eb::Scope::BOX != result.searched[at].scope)
+				continue;
 			budget[at] = room;
 			look(at, result.searched[at].box);
 			room -= static_cast<int>(found[at].size());
@@ -208,8 +193,8 @@ bool ImageDetector::detect(
 		// at, because that is what they are.
 		for (size_t at = 0; at < images.size(); ++at) {
 			if (room <= 0) break;
-			if (known[at]) continue;
-			if (eb::Scope::BOX == scope_wanted(at)) continue;
+			if (known[at] || eb::Scope::BOX == scope_wanted(at))
+				continue;
 			// The whole frame holds the box, so this search finds the box
 			// hits over again. Give their room back before asking for more,
 			// or they would be counted twice and lost from the answer.
@@ -217,7 +202,8 @@ bool ImageDetector::detect(
 			budget[at] = room;
 			result.searched[at].scope =
 				eb::Scope::BOX == result.searched[at].scope
-					? eb::Scope::BOX_THEN_FULL : eb::Scope::FULL;
+				? eb::Scope::BOX_THEN_FULL
+				: eb::Scope::FULL;
 			look(at, whole);
 			room -= static_cast<int>(found[at].size());
 		}
@@ -232,12 +218,14 @@ bool ImageDetector::detect(
 	// whatever other patterns it is asked with.
 	for (size_t at = 0; at < images.size(); ++at) {
 		result.hits.insert(
-			result.hits.end(), found[at].begin(), found[at].end()
+			result.hits.end(),
+			found[at].begin(),
+			found[at].end()
 		);
 		if (known[at]) continue;   // came from the memo, already in it
 		// A pattern never looked at answers nothing, and must not look as
 		// if it did: the plan gave it a box that was never searched.
-		if (0 == budget[at]) {
+		if (!budget[at]) {
 			result.searched[at] = PatternSearch {images[at]};
 			continue;
 		}
@@ -249,7 +237,8 @@ bool ImageDetector::detect(
 			images[at],
 			budget[at],
 			eb::Scope::BOX == result.searched[at].scope
-				? eb::Scope::BOX : eb::Scope::FULL,
+				? eb::Scope::BOX
+				: eb::Scope::FULL,
 			result.searched[at],
 			found[at]
 		});
@@ -260,21 +249,6 @@ bool ImageDetector::detect(
 	);
 	rank_hits(result.hits, max_hits);
 	return true;
-}
-
-void ImageDetector::rank_hits(std::vector<DetectionHit>& hits, int max_hits)
-{
-	// Best first, from whichever pattern, and never more than were asked
-	// for. The count is over the whole request, so hits of several patterns
-	// compete for the same places.
-	std::stable_sort(
-		hits.begin(), hits.end(),
-		[](const DetectionHit& one, const DetectionHit& other) {
-			return one.certainty > other.certainty;
-		}
-	);
-	if (static_cast<int>(hits.size()) > max_hits)
-		hits.resize(static_cast<size_t>(max_hits));
 }
 
 void ImageDetector::search_area(
@@ -366,7 +340,7 @@ void ImageDetector::search_area(
 	// least one position from a map of finite size. The search ends by itself
 	// when nothing is left above the threshold.
 	while (static_cast<int>(hits.size()) < room) {
-		double    certainty {0.0};
+		double certainty {0.0};
 		cv::Point at;
 		cv::minMaxLoc(result, nullptr, &certainty, nullptr, &at);
 		if (certainty < pattern.threshold) break;
@@ -453,6 +427,21 @@ double ImageDetector::best_fit(
 	return std::sqrt(std::max(0.0, closest) / weight);
 }
 
+void ImageDetector::rank_hits(std::vector<DetectionHit>& hits, int max_hits)
+{
+	// Best first, from whichever pattern, and never more than were asked
+	// for. The count is over the whole request, so hits of several patterns
+	// compete for the same places.
+	std::stable_sort(
+		hits.begin(), hits.end(),
+		[](const DetectionHit& one, const DetectionHit& other) {
+			return one.certainty > other.certainty;
+		}
+	);
+	if (static_cast<int>(hits.size()) > max_hits)
+		hits.resize(static_cast<size_t>(max_hits));
+}
+
 cv::Point ImageDetector::search_margines(const ImagePattern& pattern) const
 {
 	// A fraction given for one axis is measured against that axis. The shared
@@ -460,10 +449,13 @@ cv::Point ImageDetector::search_margines(const ImagePattern& pattern) const
 	// wide flat button gets as much room above it as beside it, and that is
 	// where a panel with one more line moves it.
 	const auto pixels = [this, &pattern](double axis, int size) {
-		const double fraction =
-			ImagePattern::margine_given(axis)                   ? axis :
-			ImagePattern::margine_given(pattern.search_margine) ?
-				pattern.search_margine : SEARCH_MARGINE_DEFAULT;
+		const double fraction {
+			ImagePattern::margine_given(axis)
+				? axis
+				: ImagePattern::margine_given(pattern.search_margine)
+					? pattern.search_margine
+					: SEARCH_MARGINE_DEFAULT
+		};
 		const int reference =
 			ImagePattern::margine_given(axis) ? size : pattern.longest();
 		return std::max(
@@ -482,38 +474,33 @@ cv::Rect ImageDetector::quick_box(
 	const cv::Point&    last,
 	const cv::Rect&     frame) const
 {
-	const cv::Point margines = search_margines(pattern);
+	const cv::Point margines {search_margines(pattern)};
+
+	// The pattern where it was last seen, widened by the margin and clipped to
+	// the frame. Clipping never makes the span smaller than the pattern, which
+	// would leave nothing to match.
+	const auto quick_span = [](
+		int at, int size, int margin, int limit,
+		int& start, int& length)
+	{
+		start   = std::max(0,     at - margin);
+		int end = std::min(limit, at + margin + size);
+		if (end - start < size) {
+			if (end >= limit)
+				start = std::max(0, limit - size);
+			end = std::min(limit, start + size);
+		}
+		length = end - start;
+	};
 
 	cv::Rect box {frame};
-	if (pattern.fixed_x()) {
-		quick_span(
-			last.x, pattern.width(), margines.x,
-			frame.width, box.x, box.width
-		);
-	}
-	if (pattern.fixed_y()) {
-		quick_span(
-			last.y, pattern.height(), margines.y,
-			frame.height, box.y, box.height
-		);
-	}
+	if (pattern.fixed_x()) quick_span(
+		last.x, pattern.width(), margines.x, frame.width,
+		box.x, box.width
+	);
+	if (pattern.fixed_y()) quick_span(
+		last.y, pattern.height(), margines.y, frame.height,
+		box.y, box.height
+	);
 	return box;
 }
-
-namespace {
-
-// The pattern where it was last seen, widened by the margin and clipped to
-// the frame. Clipping never makes the span smaller than the pattern, which
-// would leave nothing to match.
-void quick_span(int at, int size, int margin, int limit, int& start, int& length)
-{
-	start   = std::max(0, at - margin);
-	int end = std::min(limit, at + size + margin);
-	if (end - start < size) {
-		if (end >= limit) start = std::max(0, limit - size);
-		end = std::min(limit, start + size);
-	}
-	length = end - start;
-}
-
-} // namespace

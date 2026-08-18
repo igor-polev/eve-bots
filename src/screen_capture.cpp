@@ -39,7 +39,7 @@ eb::Millis ScreenCapture::frame_life() const noexcept
 	return eb::Millis {1000 / std::max(1u, m_frame_rate)};
 }
 
-bool ScreenCapture::frame(Frame& into)
+bool ScreenCapture::new_frame(Frame& into)
 {
 	std::lock_guard<std::mutex> lock {m_mutex};
 	if (m_running.load()
