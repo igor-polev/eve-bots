@@ -49,11 +49,13 @@ bool ImageDetector::detect(
 		return false;
 	}
 
-	// A frame we have not seen before makes every kept answer useless: those
-	// answers were about pixels that are gone. While capture hands back the
-	// same frame, the kept answers still hold.
-	if (m_capture.frame(m_frame))
+	// A frame we have not seen before makes every kept answer useless, and
+	// every converted pixel with it: both were about pixels that are gone.
+	// While capture hands back the same frame, the kept answers still hold.
+	if (m_capture.frame(m_frame)) {
 		m_memo.clear();
+		m_converted = cv::Rect {};
+	}
 	if (m_frame.empty()) {
 		error = "no frame captured yet - is the window minimised?";
 		return false;
@@ -117,7 +119,7 @@ bool ImageDetector::detect(
 
 	// Hits kept per pattern, so each can be remembered on its own. The
 	// answer joins them together. The memo keeps them apart.
-	std::vector<std::vector<DetectionHit>> recalled(images.size());
+	std::vector<std::vector<DetectionHit>> found(images.size());
 
 	// What is already known about this frame, pattern by pattern. A pattern
 	// that was found answers the whole request, because any one of them is
@@ -159,16 +161,16 @@ bool ImageDetector::detect(
 			rank_hits(hits, max_hits);
 
 			known[at]           = true;
-			recalled[at]        = std::move(hits);
+			found[at]        = std::move(hits);
 			result.searched[at] = memo.searched;
-			answered            = answered || !recalled[at].empty();
+			answered            = answered || !found[at].empty();
 			break;
 		}
 	}
 	if (answered) {
 		for (size_t at = 0; at < images.size(); ++at) {
 			result.hits.insert(
-				result.hits.end(), recalled[at].begin(), recalled[at].end()
+				result.hits.end(), found[at].begin(), found[at].end()
 			);
 		}
 		result.remembered = true;
@@ -177,31 +179,15 @@ bool ImageDetector::detect(
 	}
 
 	try {
-		// The frame as float BGR, which is what matchTemplate needs.
-		// Converting only the searched rectangle is what makes a quick
-		// search cheap. On an ultrawide frame the conversion alone costs
-		// more than matching a small box.
-		const auto converted = [&captured](const cv::Rect& area) {
-			cv::Mat colour;
-			cv::cvtColor(captured(area), colour, cv::COLOR_BGRA2BGR);
-			cv::Mat scene;
-			colour.convertTo(scene, CV_32FC3, COLOUR_SCALE);
-			return scene;
-		};
-
-		// One pattern's share of the work, in whatever area it is looked
-		// for. origin says where that area starts in the frame.
-		const auto look = [&](size_t at, const cv::Mat& scene, const cv::Point& origin)
-		{
+		// One pattern's share of the work, in whatever area it is looked for.
+		const auto look = [&](size_t at, const cv::Rect& area) {
 			PatternSearch& part = result.searched[at];
-			int mistaken {0};
-			search_area(scene, origin, part.image, max_hits, recalled[at], mistaken);
-			part.mistaken += mistaken;
-			if (recalled[at].empty()) return;
+			search_area(captured, area, part.image, max_hits, found[at]);
+			if (found[at].empty()) return;
 
 			// Writing down where it was found is what makes the next search
 			// quick. A position that did not move is not sent to the cache.
-			const cv::Point corner = recalled[at].front().at;
+			const cv::Point corner = found[at].front().at;
 			if (m_library.set_last_hit(part.image, corner))
 				m_cache.store(m_library(part.image), corner);
 		};
@@ -214,9 +200,8 @@ bool ImageDetector::detect(
 			// That is not a reason to search it again.
 			if (known[at]) continue;
 			if (eb::Scope::BOX != result.searched[at].scope) continue;
-			const cv::Rect& box = result.searched[at].box;
-			look(at, converted(box), box.tl());
-			any = any || !recalled[at].empty();
+			look(at, result.searched[at].box);
+			any = any || !found[at].empty();
 		}
 
 		// Nothing found in any box means the whole frame is searched, for
@@ -224,18 +209,13 @@ bool ImageDetector::detect(
 		// something, the others are spared that cost, and the ones left at
 		// NONE say they were never looked at.
 		if (!any) {
-			// Every pattern here reads the same pixels, so the whole frame
-			// is converted once and shared. Built on first use, because a
-			// box only request may leave this loop with nothing to do.
-			cv::Mat scene;
 			for (size_t at = 0; at < images.size(); ++at) {
 				if (known[at]) continue;
 				if (eb::Scope::BOX == scope_wanted(at)) continue;
-				if (scene.empty()) scene = converted(whole);
 				result.searched[at].scope =
 					eb::Scope::BOX == result.searched[at].scope
 						? eb::Scope::BOX_THEN_FULL : eb::Scope::FULL;
-				look(at, scene, whole.tl());
+				look(at, whole);
 			}
 		}
 	}
@@ -250,7 +230,7 @@ bool ImageDetector::detect(
 	for (size_t at = 0; at < images.size(); ++at) {
 		if (known[at]) continue;
 		result.hits.insert(
-			result.hits.end(), recalled[at].begin(), recalled[at].end()
+			result.hits.end(), found[at].begin(), found[at].end()
 		);
 		// A pattern never looked at answers nothing: another one was found
 		// before this one cost anything.
@@ -264,7 +244,7 @@ bool ImageDetector::detect(
 			eb::Scope::BOX == result.searched[at].scope
 				? eb::Scope::BOX : eb::Scope::FULL,
 			result.searched[at],
-			recalled[at]
+			found[at]
 		});
 	}
 	rank_hits(result.hits, max_hits);
@@ -286,14 +266,57 @@ void ImageDetector::rank_hits(std::vector<DetectionHit>& hits, int max_hits)
 }
 
 void ImageDetector::search_area(
-	const cv::Mat&             scene,
-	const cv::Point&           origin,
+	const cv::Mat&             captured,
+	const cv::Rect&            area,
 	size_t                     image,
 	int                        max_hits,
-	std::vector<DetectionHit>& hits,
-	int&                       mistaken) const
+	std::vector<DetectionHit>& hits)
 {
 	const ImagePattern& pattern = m_library(image);
+
+	// create() allocates the first time only, and again after the window
+	// changed size. It costs nothing on every other call.
+	m_scene.create(captured.rows, captured.cols, CV_32FC3);
+
+	// One piece of the frame, converted straight into its own place in
+	// m_scene, so a point in m_scene is a point in the frame.
+	const auto convert = [this, &captured](const cv::Rect& piece) {
+		if (piece.empty()) return;
+		cv::Mat colour;
+		cv::cvtColor(captured(piece), colour, cv::COLOR_BGRA2BGR);
+		cv::Mat into {m_scene(piece)};
+		colour.convertTo(into, CV_32FC3, COLOUR_SCALE);
+	};
+
+	if (m_converted.empty()) {
+		convert(area);
+		m_converted = area;
+	}
+	else if ((m_converted & area) != area) {
+		// Grow the converted part to hold both rectangles, and convert only
+		// the four strips around the old one. Each strip can come out empty,
+		// which convert() skips. Together they cover the new pixels exactly,
+		// so no pixel is converted twice while the frame lasts.
+		const cv::Rect grown {m_converted | area};
+		convert({
+			grown.x, grown.y,
+			grown.width, m_converted.y - grown.y
+		});
+		convert({
+			grown.x, m_converted.br().y,
+			grown.width, grown.br().y - m_converted.br().y
+		});
+		convert({
+			grown.x, m_converted.y,
+			m_converted.x - grown.x, m_converted.height
+		});
+		convert({
+			m_converted.br().x, m_converted.y,
+			grown.br().x - m_converted.br().x, m_converted.height
+		});
+		m_converted = grown;
+	}
+	const cv::Mat scene {m_scene(area)};
 
 	cv::Mat result;
 	cv::matchTemplate(
@@ -327,7 +350,6 @@ void ImageDetector::search_area(
 	size_t first_twin = 0;
 
 	hits.clear();
-	mistaken = 0;
 	// Every candidate is blanked below, taken or not, so each pass removes at
 	// least one position from a map of finite size. The search ends by itself
 	// when nothing is left above the threshold.
@@ -361,13 +383,10 @@ void ImageDetector::search_area(
 				}
 			}
 		}
-		if (claimed) {
-			++mistaken;
-		} else {
-			// matchTemplate positions are top left corners already, so a hit
-			// only moves from result into frame coordinates.
-			hits.push_back(DetectionHit {image, at + origin, certainty, fit});
-		}
+		// matchTemplate positions are top left corners already, so a hit only
+		// moves from result into frame coordinates.
+		if (!claimed)
+			hits.push_back(DetectionHit {image, at + area.tl(), certainty, fit});
 
 		// Blank this match either way. A rejected one left in place would be
 		// found again on every pass after it.

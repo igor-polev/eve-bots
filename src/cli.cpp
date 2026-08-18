@@ -169,17 +169,6 @@ std::string scope_text(const PatternSearch& part)
 	}
 }
 
-// "2 candidates were something similar", empty when there were none. It
-// is worth printing: this is the difference between "not there" and "not
-// recognised".
-std::string mistaken_text(int mistaken)
-{
-	if (mistaken <= 0) return {};
-	return std::to_string(mistaken)
-	     + (1 == mistaken ? " candidate was" : " candidates were")
-	     + " something similar";
-}
-
 // "gate,station" gives the two names. Empty parts are dropped, so a comma
 // at the end is not an error.
 std::vector<std::string> split_commas(const std::string& list)
@@ -604,27 +593,24 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 
 	// With one pattern everything fits on the summary line. With several,
 	// each was looked for in its own way and gets its own line below.
-	std::string where, mistaken;
+	std::string where;
 	if (!several) {
 		// A remembered answer searched nothing this time, so the scope
 		// belongs to the search that first made it.
 		where = (found.remembered ? ", remembered from " : ", searched ")
 		      + scope_text(found.searched.front());
-		const std::string claimed =
-			mistaken_text(found.searched.front().mistaken);
-		if (!claimed.empty()) mistaken = ", " + claimed;
 	}
 	else if (found.remembered)
 		where = ", remembered from the last search of this frame";
 
 	if (found.hits.empty()) {
 		std::cout << what << " not found ("
-		          << spent.count() << " ms" << where << mistaken << ")"
+		          << spent.count() << " ms" << where << ")"
 		          << (several ? ":" : ".") << "\n";
 	} else {
 		std::cout << what << " found " << found.hits.size()
 		          << (1 == found.hits.size() ? " time (" : " times (")
-		          << spent.count() << " ms" << where << mistaken << "):\n";
+		          << spent.count() << " ms" << where << "):\n";
 		for (const ImageDetector::DetectionHit& hit : found.hits) {
 			std::cout << "  ";
 			if (several) std::cout << "'" << m_images(hit.image).name << "' ";
@@ -647,10 +633,8 @@ void Cli::cmd_detect(const std::vector<std::string>& args)
 			          << "': another pattern answered first\n";
 			continue;
 		}
-		std::cout << "  looked for '" << name << "' in " << scope_text(part);
-		const std::string claimed = mistaken_text(part.mistaken);
-		if (!claimed.empty()) std::cout << ", " << claimed;
-		std::cout << "\n";
+		std::cout << "  looked for '" << name << "' in " << scope_text(part)
+		          << "\n";
 	}
 }
 

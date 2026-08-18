@@ -59,13 +59,7 @@ public:
 	struct PatternSearch {
 		size_t      image {0};
 		SearchScope scope {SearchScope::NONE}; // where this one was looked for
-		cv::Rect    box;   // the quick box, empty unless scope names one
-		// Candidates this pattern matched well enough, but which a pattern
-		// it can be confused with matched better. Nothing in the search
-		// reads it. It is there for the report, where it tells "the thing
-		// is not on screen" apart from "it is on screen and was read as
-		// another pattern". The box pass and the full pass add up.
-		int         mistaken {0};
+		cv::Rect    box;  // the quick box, empty unless scope names one
 	};
 
 	struct Detection {
@@ -182,19 +176,17 @@ private:
 	// than were asked for.
 	static void rank_hits(std::vector<DetectionHit>& hits, int max_hits);
 
-	// Searches one pattern in a piece of the frame that is already converted
-	// to float BGR. origin is where that piece starts in the frame, so hits
-	// come back in frame coordinates. They arrive best match first and
-	// replace what was in the vector. mistaken counts the candidates that a
-	// similar pattern matched better.
+	// Searches one rectangle of the BGRA frame for one pattern. Hits come
+	// back in frame coordinates, best match first, and replace what was in
+	// the vector. Converts what it needs into m_scene first, so it is not
+	// const.
 	void search_area(
-		const cv::Mat&             scene,
-		const cv::Point&           origin,
+		const cv::Mat&             captured,
+		const cv::Rect&            area,
 		size_t                     image,
 		int                        max_hits,
-		std::vector<DetectionHit>& hits,
-		int&                       mistaken
-	) const;
+		std::vector<DetectionHit>& hits
+	);
 
 	// How close this pattern comes to the best position in a window of the
 	// scene, as a root mean square pixel difference on the images' own 0..1
@@ -223,6 +215,14 @@ private:
 	std::mutex m_mutex;  // one caller at a time, and guards everything below
 
 	Frame m_frame;
+	// The same frame as float BGR, which is what matching needs. It is the
+	// size of the whole frame, so a point in it is a point in the frame, but
+	// only m_converted holds real pixels. That rectangle grows as searches
+	// ask for areas, and a new frame makes all of it stale. Converting is
+	// what a search of a small box would otherwise spend most of its time
+	// on, so nothing is converted twice while the frame lasts.
+	cv::Mat  m_scene;
+	cv::Rect m_converted;
 	// Every search already made in m_frame. Entries are only added and read,
 	// and the whole list is dropped when the frame changes. A vector suits
 	// that: one block to scan, one allocation to grow, and clear() keeps the
