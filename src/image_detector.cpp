@@ -121,16 +121,20 @@ bool ImageDetector::detect(
 	// answer joins them together. The memo keeps them apart.
 	std::vector<std::vector<DetectionHit>> found(images.size());
 
+	// How many hits are still wanted. max_hits counts the whole request, so
+	// every hit taken, remembered or freshly found, leaves one less to look
+	// for. The search stops as soon as this reaches zero.
+	int room {max_hits};
+
 	// What is already known about this frame, pattern by pattern. A pattern
-	// that was found answers the whole request, because any one of them is
-	// enough. A pattern that was searched for and missed does not have to be
-	// searched again.
+	// that was searched for and missed does not have to be searched again,
+	// and one that was found gives its hits towards the count.
 	std::vector<bool> known(images.size(), false);
-	bool              answered {false};
 	for (size_t at = 0; at < images.size(); ++at) {
+		if (room <= 0) break;
 		const eb::Scope asked {scope_wanted(at)};
 		for (const Remembered& memo : m_memo) {
-			if (!memo.answers(images[at], max_hits, asked)) continue;
+			if (!memo.answers(images[at], room, asked)) continue;
 
 			std::vector<DetectionHit> hits = memo.hits;
 			if (eb::Scope::BOX == asked && eb::Scope::FULL == memo.scope) {
@@ -155,34 +159,27 @@ bool ImageDetector::detect(
 				// says nothing about the box. It can answer for the box
 				// only if enough hits are left, or if the search ran out
 				// of candidates instead of room.
-				if (hits.size() < static_cast<size_t>(max_hits) && !memo.exhaustive())
+				if (hits.size() < static_cast<size_t>(room) && !memo.exhaustive())
 					continue;
 			}
-			rank_hits(hits, max_hits);
+			rank_hits(hits, room);
 
 			known[at]           = true;
-			found[at]        = std::move(hits);
+			found[at]           = std::move(hits);
 			result.searched[at] = memo.searched;
-			answered            = answered || !found[at].empty();
+			room               -= static_cast<int>(found[at].size());
 			break;
 		}
 	}
-	if (answered) {
-		for (size_t at = 0; at < images.size(); ++at) {
-			result.hits.insert(
-				result.hits.end(), found[at].begin(), found[at].end()
-			);
-		}
-		result.remembered = true;
-		rank_hits(result.hits, max_hits);
-		return true;
-	}
 
+	// How much room each pattern was really given. Zero means it was never
+	// looked at: the count was full before the search reached it.
+	std::vector<int> budget(images.size(), 0);
 	try {
 		// One pattern's share of the work, in whatever area it is looked for.
 		const auto look = [&](size_t at, const cv::Rect& area) {
 			PatternSearch& part = result.searched[at];
-			search_area(captured, area, part.image, max_hits, found[at]);
+			search_area(captured, area, part.image, budget[at], found[at]);
 			if (found[at].empty()) return;
 
 			// Writing down where it was found is what makes the next search
@@ -194,29 +191,35 @@ bool ImageDetector::detect(
 
 		// All boxes before any whole frame search: one pattern that moved
 		// must not cost the others their quick search.
-		bool any {false};
 		for (size_t at = 0; at < images.size(); ++at) {
+			if (room <= 0) break;
 			// A remembered part keeps the box of the search that made it.
 			// That is not a reason to search it again.
 			if (known[at]) continue;
 			if (eb::Scope::BOX != result.searched[at].scope) continue;
+			budget[at] = room;
 			look(at, result.searched[at].box);
-			any = any || !found[at].empty();
+			room -= static_cast<int>(found[at].size());
 		}
 
-		// Nothing found in any box means the whole frame is searched, for
-		// every pattern, because any of them will do. If a box did find
-		// something, the others are spared that cost, and the ones left at
-		// NONE say they were never looked at.
-		if (!any) {
-			for (size_t at = 0; at < images.size(); ++at) {
-				if (known[at]) continue;
-				if (eb::Scope::BOX == scope_wanted(at)) continue;
-				result.searched[at].scope =
-					eb::Scope::BOX == result.searched[at].scope
-						? eb::Scope::BOX_THEN_FULL : eb::Scope::FULL;
-				look(at, whole);
-			}
+		// The whole frame, for every pattern that may be looked for there,
+		// until the count is full. A box that filled it on its own spares
+		// the others this cost, and they are then reported as never looked
+		// at, because that is what they are.
+		for (size_t at = 0; at < images.size(); ++at) {
+			if (room <= 0) break;
+			if (known[at]) continue;
+			if (eb::Scope::BOX == scope_wanted(at)) continue;
+			// The whole frame holds the box, so this search finds the box
+			// hits over again. Give their room back before asking for more,
+			// or they would be counted twice and lost from the answer.
+			room += static_cast<int>(found[at].size());
+			budget[at] = room;
+			result.searched[at].scope =
+				eb::Scope::BOX == result.searched[at].scope
+					? eb::Scope::BOX_THEN_FULL : eb::Scope::FULL;
+			look(at, whole);
+			room -= static_cast<int>(found[at].size());
 		}
 	}
 	catch (const cv::Exception& e) {
@@ -228,25 +231,33 @@ bool ImageDetector::detect(
 	// Each pattern is kept on its own, so a later request finds it here
 	// whatever other patterns it is asked with.
 	for (size_t at = 0; at < images.size(); ++at) {
-		if (known[at]) continue;
 		result.hits.insert(
 			result.hits.end(), found[at].begin(), found[at].end()
 		);
-		// A pattern never looked at answers nothing: another one was found
-		// before this one cost anything.
-		if (eb::Scope::NONE == result.searched[at].scope) continue;
-		// The area covered, not the name of the request: a box-then-full
-		// search that stopped at the box covered the box, and one that went
-		// on covered the frame.
+		if (known[at]) continue;   // came from the memo, already in it
+		// A pattern never looked at answers nothing, and must not look as
+		// if it did: the plan gave it a box that was never searched.
+		if (0 == budget[at]) {
+			result.searched[at] = PatternSearch {images[at]};
+			continue;
+		}
+		// What is kept is the room this one pattern really had, not the
+		// count of the whole request. Kept with the area covered, not the
+		// name of the request: a box-then-full search that stopped at the
+		// box covered the box, and one that went on covered the frame.
 		m_memo.push_back(Remembered {
 			images[at],
-			max_hits,
+			budget[at],
 			eb::Scope::BOX == result.searched[at].scope
 				? eb::Scope::BOX : eb::Scope::FULL,
 			result.searched[at],
 			found[at]
 		});
 	}
+	// Nothing was searched this time when no pattern was given any room.
+	result.remembered = std::none_of(
+		budget.begin(), budget.end(), [](int given) { return given > 0; }
+	);
 	rank_hits(result.hits, max_hits);
 	return true;
 }
@@ -254,7 +265,8 @@ bool ImageDetector::detect(
 void ImageDetector::rank_hits(std::vector<DetectionHit>& hits, int max_hits)
 {
 	// Best first, from whichever pattern, and never more than were asked
-	// for: each pattern may have added up to max_hits.
+	// for. The count is over the whole request, so hits of several patterns
+	// compete for the same places.
 	std::stable_sort(
 		hits.begin(), hits.end(),
 		[](const DetectionHit& one, const DetectionHit& other) {
@@ -269,7 +281,7 @@ void ImageDetector::search_area(
 	const cv::Mat&             captured,
 	const cv::Rect&            area,
 	size_t                     image,
-	int                        max_hits,
+	int                        room,
 	std::vector<DetectionHit>& hits)
 {
 	const ImagePattern& pattern = m_library(image);
@@ -353,7 +365,7 @@ void ImageDetector::search_area(
 	// Every candidate is blanked below, taken or not, so each pass removes at
 	// least one position from a map of finite size. The search ends by itself
 	// when nothing is left above the threshold.
-	while (static_cast<int>(hits.size()) < max_hits) {
+	while (static_cast<int>(hits.size()) < room) {
 		double    certainty {0.0};
 		cv::Point at;
 		cv::minMaxLoc(result, nullptr, &certainty, nullptr, &at);

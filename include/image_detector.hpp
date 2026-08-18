@@ -90,8 +90,12 @@ public:
 		frame. result is then empty. Finding nothing is not an error: it
 		returns true with no hits.
 
-		Several patterns mean "any of these". Each of the max_hits reported
-		may come from any of them, and every hit says which pattern it is.
+		Several patterns mean "any of these". max_hits counts the whole
+		request and not each pattern: the hits may come from any of them in
+		any mixture, and every hit says which pattern it is. The search
+		stops as soon as that many are found, so a pattern named after the
+		ones that filled the count is never looked for at all.
+
 		This is not the same as searching for them one by one: the boxes of
 		all patterns are searched before the whole frame is, so one pattern
 		that moved cannot cost the others their quick search.
@@ -141,7 +145,9 @@ private:
 	// that pattern together with others.
 	struct Remembered {
 		size_t      image {0};
-		int         max_hits {0};   // how many hits were wanted that time
+		// The room this one pattern was given, which is what was left of
+		// the count of the request that made it, not the count itself.
+		int         max_hits {0};
 		// The area really searched, BOX or FULL. The name of the request
 		// does not matter later. Only where the pixels were looked at
 		// decides what the answer can still be used for.
@@ -176,15 +182,15 @@ private:
 	// than were asked for.
 	static void rank_hits(std::vector<DetectionHit>& hits, int max_hits);
 
-	// Searches one rectangle of the BGRA frame for one pattern. Hits come
-	// back in frame coordinates, best match first, and replace what was in
-	// the vector. Converts what it needs into m_scene first, so it is not
-	// const.
+	// Searches one rectangle of the BGRA frame for one pattern, taking at
+	// most room hits. They come back in frame coordinates, best match
+	// first, and replace what was in the vector. Converts what it needs
+	// into m_scene first, so it is not const.
 	void search_area(
 		const cv::Mat&             captured,
 		const cv::Rect&            area,
 		size_t                     image,
-		int                        max_hits,
+		int                        room,
 		std::vector<DetectionHit>& hits
 	);
 
