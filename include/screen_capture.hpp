@@ -64,11 +64,10 @@ private:
 	using DXRevoker     = wrtg::Capture::Direct3D11CaptureFramePool::FrameArrived_revoker;
 	using DXInspectable = wrt::Foundation::IInspectable;
 
+	static constexpr int FRAME_POOL_BUFFERS {2};
 	static constexpr DXPixelFormat CAPTURE_FORMAT {
 		DXPixelFormat::B8G8R8A8UIntNormalized
 	};
-	static constexpr int        FRAME_POOL_BUFFERS {2};
-	static constexpr eb::Millis FRAME_WAIT_TIMEOUT {250};
 
 	void on_frame_arrived(const DXFramePool& sender, const DXInspectable& args);
 	void store_frame(ID3D11Texture2D* texture, uint32_t width, uint32_t height);

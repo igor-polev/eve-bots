@@ -23,10 +23,6 @@
 
 #include "common_defs.hpp"
 
-// Axes along which a pattern normally keeps its place. Most of the EVE user
-// interface is fixed to a panel, so once an element has been found it appears
-// at the same coordinates again. That lets the detector search a small box
-// instead of the whole frame.
 enum FixedDirections : unsigned {
 	FIXED_NONE = 0,
 	FIXED_X    = 1,
@@ -82,8 +78,8 @@ struct ImagePattern {
 	int  height()  const noexcept { return image.rows; }
 	int  longest() const noexcept { return std::max(width(), height()); }
 	bool masked()  const noexcept { return !mask.empty(); }
-	bool fixed_x() const noexcept { return 0 != (fixed_directions & FIXED_X); }
-	bool fixed_y() const noexcept { return 0 != (fixed_directions & FIXED_Y); }
+	bool fixed_x() const noexcept { return fixed_directions & FIXED_X; }
+	bool fixed_y() const noexcept { return fixed_directions & FIXED_Y; }
 };
 
 // Patterns are addressed by their index in the library. A name costs a map

@@ -363,10 +363,10 @@ bool ImageLibrary::load_file(
 
 	if (!link_similar(patterns, index, named, path, error)) return false;
 
-	{
-		std::lock_guard<std::mutex> lock {m_hits_mutex};
-		m_last_hits.assign(patterns.size(), NEVER_SEEN);
-	}
+	std::unique_lock<std::mutex> lock {m_hits_mutex};
+	m_last_hits.assign(patterns.size(), NEVER_SEEN);
+	lock.unlock();
+
 	m_patterns  = std::move(patterns);
 	m_index     = std::move(index);
 	m_directory = dir;

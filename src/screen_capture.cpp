@@ -95,20 +95,20 @@ bool ScreenCapture::start(HWND hwnd, std::string& error)
 		try { m_session.IsCursorCaptureEnabled(false); } catch (...) {}
 		try { m_session.IsBorderRequired(false);       } catch (...) {}
 
-		{
-			std::lock_guard<std::mutex> lock {m_mutex};
-			m_d3d_device     = device;
-			m_d3d_context    = context;
-			m_staging        = nullptr;
-			m_staging_width  = 0;
-			m_staging_height = 0;
-			m_frame          = Frame {};
-			m_checked        = eb::TimePoint {};
-		}
-		{
-			std::lock_guard<std::mutex> lock {m_signal_mutex};
-			m_frame_ready = false;
-		}
+		std::unique_lock<std::mutex> lock {m_mutex};
+		m_d3d_device     = device;
+		m_d3d_context    = context;
+		m_staging        = nullptr;
+		m_staging_width  = 0;
+		m_staging_height = 0;
+		m_frame          = Frame {};
+		m_checked        = eb::TimePoint {};
+		lock.unlock();
+
+		std::unique_lock<std::mutex> signal_lock {m_signal_mutex};
+		m_frame_ready = false;
+		signal_lock.unlock();
+
 		m_target = hwnd;
 
 		m_frame_arrived = m_pool.FrameArrived(
@@ -156,10 +156,9 @@ void ScreenCapture::on_frame_arrived(const DXFramePool&, const DXInspectable&)
 {
 	// Does no work on purpose. It only notes that a frame is waiting, and
 	// whoever asked for a frame decides whether to spend time on it.
-	{
-		std::lock_guard<std::mutex> lock {m_signal_mutex};
-		m_frame_ready = true;
-	}
+	std::unique_lock<std::mutex> lock {m_signal_mutex};
+	m_frame_ready = true;
+	lock.unlock();
 	m_signal.notify_one();
 }
 
@@ -168,13 +167,16 @@ bool ScreenCapture::capture_frame()
 	if (!m_pool) return false;
 
 	while (m_pool.TryGetNextFrame()) {} // Drop frames nobody asked for.
-	{ // TODO: Here, like in many other sites, unlocking m_signal_mutex is done by the std::unique_lock out-of-scope mechanics instead of direct unlock(). I prefer the direct unlock() - make changes accross the code. Use lock_guard in cases where out-of-scope is a natural choice (at the very end of function or block).
-		std::unique_lock<std::mutex> lock {m_signal_mutex};
-		m_frame_ready = false;
-		m_signal.wait_for(lock, FRAME_WAIT_TIMEOUT, [this] { // TODO: FRAME_WAIT_TIMEOUT here can be derived from FPS parameter instead of separate constant. Do so.
-			return m_frame_ready || !m_running.load();
-		});
-	}
+
+	// One frame life is the longest wait that can bring anything: a window
+	// that does not redraw sends no frame at all, and waiting longer than the
+	// frame rate asks for only delays the answer.
+	std::unique_lock<std::mutex> lock {m_signal_mutex};
+	m_frame_ready = false;
+	m_signal.wait_for(lock, frame_life(), [this] {
+		return m_frame_ready || !m_running.load();
+	});
+	lock.unlock();
 	// Asked for however the wait ended: a frame may have arrived between
 	// dropping the old ones and clearing the flag.
 	auto frame = m_pool.TryGetNextFrame();
