@@ -14,13 +14,10 @@
 
 // Tightly packed 32-bit BGRA pixels, top-down row order.
 struct Frame {
-	std::vector<uint8_t> pixels;
-	uint32_t width  {0};
-	uint32_t height {0};
-	// When these pixels were captured. It is also the identity of the frame:
-	// two searches given the same value look at the very same pixels, so they
-	// cannot give different answers.
-	eb::TimePoint taken {};
+	std::vector<uint8_t> pixels {};
+	eb::TimePoint        taken  {};
+	uint32_t             width  {0};
+	uint32_t             height {0};
 
 	bool empty() const noexcept {
 		return pixels.empty() || 0 == width || 0 == height;

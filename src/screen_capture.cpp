@@ -14,37 +14,10 @@
 
 #include "screen_capture.hpp"
 
-using namespace winrt::Windows::Graphics;
-using namespace winrt::Windows::Graphics::Capture;
-using namespace winrt::Windows::Graphics::DirectX;
-using namespace winrt::Windows::Graphics::DirectX::Direct3D11;
-
-ScreenCapture::~ScreenCapture()
-{
-	stop();
-}
-
-bool ScreenCapture::supported()
-{
-	try {
-		return GraphicsCaptureSession::IsSupported();
-	}
-	catch (...) {
-		return false;
-	}
-}
-
-eb::Millis ScreenCapture::frame_life() const noexcept
-{
-	return eb::Millis {1000 / std::max(1u, m_frame_rate)};
-}
-
 bool ScreenCapture::new_frame(Frame& into)
 {
 	std::lock_guard<std::mutex> lock {m_mutex};
-	if (m_running.load()
-		&& (m_frame.empty() || eb::since(m_checked) >= frame_life()))
-	{
+	if (m_running.load() && (m_frame.empty() || eb::since(m_checked) >= frame_life())) {
 		try {
 			// No new frame means the window did not redraw, so the frame
 			// in hand is still what is on screen. Only the time of asking
@@ -59,7 +32,8 @@ bool ScreenCapture::new_frame(Frame& into)
 		}
 		m_checked = eb::Clock::now();
 	}
-	if (into.taken == m_frame.taken) return false;
+	if (into.taken == m_frame.taken)
+		return false;
 	into = m_frame;
 	return true;
 }
@@ -100,26 +74,26 @@ bool ScreenCapture::start(HWND hwnd, std::string& error)
 		winrt::check_hresult(CreateDirect3D11DeviceFromDXGIDevice(
 			dxgi_device.get(), inspectable.put()
 		));
-		m_device = inspectable.as<IDirect3DDevice>();
+		m_device = inspectable.as<DXDevice>();
 
 		auto interop = winrt::get_activation_factory<
-			GraphicsCaptureItem, ::IGraphicsCaptureItemInterop>();
-		GraphicsCaptureItem item {nullptr};
+			DXItem, ::IGraphicsCaptureItemInterop>();
+		DXItem item {nullptr};
 		winrt::check_hresult(interop->CreateForWindow(
 			hwnd,
-			winrt::guid_of<GraphicsCaptureItem>(),
+			winrt::guid_of<DXItem>(),
 			winrt::put_abi(item)
 		));
 		m_item = item;
 
-		m_pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
+		m_pool = DXFramePool::CreateFreeThreaded(
 			m_device, CAPTURE_FORMAT, FRAME_POOL_BUFFERS, m_item.Size()
 		);
 		m_session = m_pool.CreateCaptureSession(m_item);
 
 		// Cosmetic options, both unsupported on older Windows 10 builds.
 		try { m_session.IsCursorCaptureEnabled(false); } catch (...) {}
-		try { m_session.IsBorderRequired(false);        } catch (...) {}
+		try { m_session.IsBorderRequired(false);       } catch (...) {}
 
 		{
 			std::lock_guard<std::mutex> lock {m_mutex};
@@ -135,8 +109,6 @@ bool ScreenCapture::start(HWND hwnd, std::string& error)
 			std::lock_guard<std::mutex> lock {m_signal_mutex};
 			m_frame_ready = false;
 		}
-		m_frame_count.store(0);
-		m_arrived_count.store(0);
 		m_target = hwnd;
 
 		m_frame_arrived = m_pool.FrameArrived(
@@ -166,17 +138,10 @@ void ScreenCapture::stop()
 
 	std::lock_guard<std::mutex> lock {m_mutex};
 	m_frame_arrived.revoke();
-	release_resources();
-	m_target = nullptr;
-}
-
-void ScreenCapture::release_resources()
-{
 	if (m_session) { m_session.Close(); m_session = nullptr; }
-	if (m_pool)    { m_pool.Close();    m_pool    = nullptr; }
-	m_item   = nullptr;
-	m_device = nullptr;
-
+	if (m_pool)    { m_pool   .Close(); m_pool    = nullptr; }
+	m_item           = nullptr;
+	m_device         = nullptr;
 	m_staging        = nullptr;
 	m_d3d_context    = nullptr;
 	m_d3d_device     = nullptr;
@@ -184,15 +149,13 @@ void ScreenCapture::release_resources()
 	m_staging_height = 0;
 	m_frame          = Frame {};
 	m_checked        = eb::TimePoint {};
+	m_target         = nullptr;
 }
 
-void ScreenCapture::on_frame_arrived(
-	const Direct3D11CaptureFramePool&,
-	const winrt::Windows::Foundation::IInspectable&)
+void ScreenCapture::on_frame_arrived(const DXFramePool&, const DXInspectable&)
 {
 	// Does no work on purpose. It only notes that a frame is waiting, and
 	// whoever asked for a frame decides whether to spend time on it.
-	m_arrived_count.fetch_add(1);
 	{
 		std::lock_guard<std::mutex> lock {m_signal_mutex};
 		m_frame_ready = true;
@@ -204,13 +167,11 @@ bool ScreenCapture::capture_frame()
 {
 	if (!m_pool) return false;
 
-	// Frames that queued up while nobody was asking show the window as it
-	// was. Each returns its buffer to the pool when it goes out of scope.
-	while (m_pool.TryGetNextFrame()) {}
-	{
+	while (m_pool.TryGetNextFrame()) {} // Drop frames nobody asked for.
+	{ // TODO: Here, like in many other sites, unlocking m_signal_mutex is done by the std::unique_lock out-of-scope mechanics instead of direct unlock(). I prefer the direct unlock() - make changes accross the code. Use lock_guard in cases where out-of-scope is a natural choice (at the very end of function or block).
 		std::unique_lock<std::mutex> lock {m_signal_mutex};
 		m_frame_ready = false;
-		m_signal.wait_for(lock, FRAME_WAIT, [this] {
+		m_signal.wait_for(lock, FRAME_WAIT_TIMEOUT, [this] { // TODO: FRAME_WAIT_TIMEOUT here can be derived from FPS parameter instead of separate constant. Do so.
 			return m_frame_ready || !m_running.load();
 		});
 	}
@@ -219,15 +180,16 @@ bool ScreenCapture::capture_frame()
 	auto frame = m_pool.TryGetNextFrame();
 	if (!frame) return false;
 
-	const SizeInt32 content = frame.ContentSize();
+	const wrtg::SizeInt32 content {frame.ContentSize()};
 	if (content.Width <= 0 || content.Height <= 0) return false;
 
 	winrt::com_ptr<ID3D11Texture2D> texture;
 	{
-		// the interop interface is in the ABI namespace, not in the
-		// projected winrt one that the using-directives above bring in
+		// the interop interface lives in the ABI namespace, which is not the
+		// projected winrt one the aliases name
 		auto access = frame.Surface().as<
-			::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+			::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess
+		>();
 		winrt::check_hresult(access->GetInterface(
 			winrt::guid_of<ID3D11Texture2D>(), texture.put_void()
 		));
@@ -237,26 +199,24 @@ bool ScreenCapture::capture_frame()
 	texture->GetDesc(&desc);
 
 	// The pool texture can be larger than the window content, so crop it.
-	const uint32_t width  = (std::min)(
-		static_cast<uint32_t>(content.Width),  desc.Width);
-	const uint32_t height = (std::min)(
-		static_cast<uint32_t>(content.Height), desc.Height);
+	const uint32_t width  {(std::min)(static_cast<uint32_t>(content.Width),  desc.Width)};
+	const uint32_t height {(std::min)(static_cast<uint32_t>(content.Height), desc.Height)};
 
 	if (!m_d3d_device || !m_d3d_context) return false;
 	store_frame(texture.get(), width, height);
-	m_frame_count.fetch_add(1);
 
 	// Follow window resizes, so the pool keeps matching the window.
-	if (content.Width  != m_item.Size().Width ||
-		content.Height != m_item.Size().Height)
-	{
+	const auto size {m_item.Size()};
+	if (content.Width != size.Width || content.Height != size.Height)
 		m_pool.Recreate(m_device, CAPTURE_FORMAT, FRAME_POOL_BUFFERS, content);
-	}
+
 	return true;
 }
 
 void ScreenCapture::store_frame(
-	ID3D11Texture2D* texture, uint32_t width, uint32_t height)
+	ID3D11Texture2D* texture,
+	uint32_t         width,
+	uint32_t         height)
 {
 	// staging texture, because the CPU cannot read a GPU texture
 	if (!m_staging || m_staging_width != width || m_staging_height != height) {
@@ -297,19 +257,16 @@ void ScreenCapture::store_frame(
 		m_staging.get(), 0, D3D11_MAP_READ, 0, &mapped
 	));
 
-	Frame frame;
-	frame.width  = width;
-	frame.height = height;
-	frame.taken  = eb::Clock::now();
-	frame.pixels.resize(static_cast<size_t>(width) * height * 4);
+	m_frame.pixels.resize(static_cast<size_t>(width) * height * 4);
+	m_frame.width  = width;
+	m_frame.height = height;
+	m_frame.taken  = eb::Clock::now();
 
 	const auto*  src = static_cast<const uint8_t*>(mapped.pData);
-	auto*        dst = frame.pixels.data();
+	auto*        dst = m_frame.pixels.data();
 	const size_t row_bytes = static_cast<size_t>(width) * 4;
 	for (uint32_t y = 0; y < height; ++y) {
 		memcpy(dst + y * row_bytes, src + y * mapped.RowPitch, row_bytes);
 	}
 	m_d3d_context->Unmap(m_staging.get(), 0);
-
-	m_frame = std::move(frame);
 }

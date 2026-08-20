@@ -422,9 +422,7 @@ void Cli::cmd_status()
 		Frame frame;
 		m_capture.new_frame(frame);
 		std::cout << "Capture: running at " << m_capture.frame_rate()
-		          << " fps, " << m_capture.frame_count()
-		          << " frames grabbed (" << m_capture.arrived_count()
-		          << " delivered by the window).\n";
+		          << " fps.\n";
 		if (frame.empty())
 			std::cout << "Last frame: none yet.\n";
 		else

@@ -139,6 +139,8 @@ bool prepare_pattern(const cv::Mat& raw, ImagePattern& pattern, std::string& err
 	}
 
 	colour.convertTo(pattern.image, CV_32FC3, scale);
+	pattern.fit_weight = static_cast<double>(pattern.width())
+	                   * pattern.height() * pattern.image.channels();
 
 	if (alpha.empty()) return true;
 
@@ -155,6 +157,12 @@ bool prepare_pattern(const cv::Mat& raw, ImagePattern& pattern, std::string& err
 	cv::Mat weights;
 	alpha.convertTo(weights, CV_32FC1, scale);
 	cv::cvtColor(weights, pattern.mask, cv::COLOR_GRAY2BGR);
+
+	// Masked TM_SQDIFF multiplies the difference by the mask before squaring,
+	// so the weight is squared in the sum as well. The L2 norm over all
+	// channels is the square root of exactly that sum.
+	const double norm {cv::norm(pattern.mask, cv::NORM_L2)};
+	pattern.fit_weight = norm * norm;
 	return true;
 }
 

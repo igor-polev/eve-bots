@@ -177,7 +177,7 @@ private:
 		const cv::Mat&             scene,
 		const cv::Rect&            window,
 		const ImagePattern&        pattern
-	) const;
+	);
 	cv::Rect quick_box(
 		const ImagePattern&        pattern,
 		const cv::Point&           last,
@@ -191,6 +191,12 @@ private:
 	Frame                   m_frame;
 	cv::Mat                 m_scene;
 	cv::Rect                m_converted;
+
+	// Scratch buffers kept between searches.
+	cv::Mat                 m_colour;  // one strip of the frame, BGR bytes
+	cv::Mat                 m_match;   // correlation map of a whole search
+	cv::Mat                 m_fit;     // difference map of one colour test
+
 	std::vector<Remembered> m_memo;
 
 	std::mutex              m_mutex;

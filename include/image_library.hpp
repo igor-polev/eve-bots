@@ -73,6 +73,11 @@ struct ImagePattern {
 	cv::Mat image;  // CV_32FC3, BGR, values 0..1
 	cv::Mat mask;   // CV_32FC3 weights; empty when the PNG is fully opaque
 
+	// What OpenCV's TM_SQDIFF sum must be divided by to become a mean, so
+	// that patterns of different sizes can be compared. It depends on the
+	// pattern alone, so it is worked out once, when the PNG is read.
+	double  fit_weight {0.0};
+
 	int  width()   const noexcept { return image.cols; }
 	int  height()  const noexcept { return image.rows; }
 	int  longest() const noexcept { return std::max(width(), height()); }

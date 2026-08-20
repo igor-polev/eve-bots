@@ -75,6 +75,11 @@ bool ImageDetector::detect(
 		0, 0, static_cast<int>(m_frame.width), static_cast<int>(m_frame.height)
 	};
 
+	// Room for the float copy of the frame. create() allocates only when the
+	// window changed size, which is rare, and a size change always arrives as
+	// a new frame, so m_converted has just been cleared above.
+	m_scene.create(captured.rows, captured.cols, CV_32FC3);
+
 	// Where a quick search would look, worked out for every pattern first.
 	// It is both what the box pass searches and what a box request cuts a
 	// kept answer down to. A box is only possible when the pattern stays in
@@ -260,18 +265,13 @@ void ImageDetector::search_area(
 {
 	const ImagePattern& pattern = m_library(image);
 
-	// create() allocates the first time only, and again after the window
-	// changed size. It costs nothing on every other call.
-	m_scene.create(captured.rows, captured.cols, CV_32FC3);
-
 	// One piece of the frame, converted straight into its own place in
 	// m_scene, so a point in m_scene is a point in the frame.
 	const auto convert = [this, &captured](const cv::Rect& piece) {
 		if (piece.empty()) return;
-		cv::Mat colour;
-		cv::cvtColor(captured(piece), colour, cv::COLOR_BGRA2BGR);
+		cv::cvtColor(captured(piece), m_colour, cv::COLOR_BGRA2BGR);
 		cv::Mat into {m_scene(piece)};
-		colour.convertTo(into, CV_32FC3, COLOUR_SCALE);
+		m_colour.convertTo(into, CV_32FC3, COLOUR_SCALE);
 	};
 
 	if (m_converted.empty()) {
@@ -304,16 +304,23 @@ void ImageDetector::search_area(
 	}
 	const cv::Mat scene {m_scene(area)};
 
-	cv::Mat result;
 	cv::matchTemplate(
-		scene, pattern.image, result, cv::TM_CCOEFF_NORMED,
+		scene,
+		pattern.image,
+		m_match,
+		cv::TM_CCOEFF_NORMED,
 		pattern.masked() ? pattern.mask : cv::noArray()
 	);
 	// Normalised correlation divides by the variance under the mask. That
 	// variance is zero where both frame and pattern are flat, so those
 	// positions come back as NaN or infinity and would win every search.
-	cv::patchNaNs(result, 0.0f);
-	cv::threshold(result, result, MAX_VALID_CERTAINTY, 0.0, cv::THRESH_TOZERO_INV);
+	cv::patchNaNs(m_match, 0.0f);
+	cv::threshold(
+		m_match, m_match,
+		MAX_VALID_CERTAINTY,
+		0.0,
+		cv::THRESH_TOZERO_INV
+	);
 
 	const int pad_x = pattern.width()  / SUPPRESSION_DIVISOR;
 	const int pad_y = pattern.height() / SUPPRESSION_DIVISOR;
@@ -342,7 +349,7 @@ void ImageDetector::search_area(
 	while (static_cast<int>(hits.size()) < room) {
 		double certainty {0.0};
 		cv::Point at;
-		cv::minMaxLoc(result, nullptr, &certainty, nullptr, &at);
+		cv::minMaxLoc(m_match, nullptr, &certainty, nullptr, &at);
 		if (certainty < pattern.threshold) break;
 
 		// The shape fits. If a pattern it can be confused with matches these
@@ -370,7 +377,7 @@ void ImageDetector::search_area(
 			}
 		}
 		// matchTemplate positions are top left corners already, so a hit only
-		// moves from result into frame coordinates.
+		// moves from the match map into frame coordinates.
 		if (!claimed)
 			hits.push_back(DetectionHit {image, at + area.tl(), certainty, fit});
 
@@ -378,53 +385,39 @@ void ImageDetector::search_area(
 		// found again on every pass after it.
 		const int left   {std::max(0, at.x - pad_x)},
 		          top    {std::max(0, at.y - pad_y)},
-		          right  {std::min(result.cols, at.x + pattern.width()  + pad_x)},
-		          bottom {std::min(result.rows, at.y + pattern.height() + pad_y)};
-		result(cv::Rect(left, top, right - left, bottom - top)) = cv::Scalar(0.0);
+		          right  {std::min(m_match.cols, at.x + pattern.width()  + pad_x)},
+		          bottom {std::min(m_match.rows, at.y + pattern.height() + pad_y)};
+		m_match(cv::Rect(left, top, right - left, bottom - top)) = cv::Scalar(0.0);
 	}
 }
 
 double ImageDetector::best_fit(
 	const cv::Mat&      scene,
 	const cv::Rect&     window,
-	const ImagePattern& pattern) const
+	const ImagePattern& pattern)
 {
-	if (window.width  < pattern.width() ||
-		window.height < pattern.height())
-	{
+	if (window.width  < pattern.width()
+	 || window.height < pattern.height()
+	 || pattern.fit_weight <= 0.0)
 		return WORST_FIT;
-	}
 
 	// TM_SQDIFF here, not the TM_CCOEFF_NORMED the search uses. This step has
 	// to see a difference in colour, and CCOEFF removes the mean of each
 	// channel before it correlates, which hides exactly that.
-	cv::Mat result;
 	cv::matchTemplate(
-		scene(window), pattern.image, result, cv::TM_SQDIFF,
+		scene(window),
+		pattern.image,
+		m_fit,
+		cv::TM_SQDIFF,
 		pattern.masked() ? pattern.mask : cv::noArray()
 	);
 
 	double closest {0.0};
-	cv::minMaxLoc(result, &closest, nullptr, nullptr, nullptr);
-
-	// What OpenCV's masked TM_SQDIFF must be divided by to become a mean. It
-	// multiplies the difference by the mask before squaring, so the weight is
-	// squared in the sum as well.
-	double weight {0.0};
-	if (!pattern.masked()) {
-		weight = static_cast<double>(pattern.width())
-		       * pattern.height() * pattern.image.channels();
-	} else {
-		cv::Mat squared;
-		cv::multiply(pattern.mask, pattern.mask, squared);
-		const cv::Scalar total = cv::sum(squared);
-		weight = total[0] + total[1] + total[2];
-	}
-	if (weight <= 0.0) return WORST_FIT;
+	cv::minMaxLoc(m_fit, &closest, nullptr, nullptr, nullptr);
 
 	// Back to the images' own scale, and comparable between patterns of
 	// different sizes. Rounding can leave the sum a little below zero.
-	return std::sqrt(std::max(0.0, closest) / weight);
+	return std::sqrt(std::max(0.0, closest) / pattern.fit_weight);
 }
 
 void ImageDetector::rank_hits(std::vector<DetectionHit>& hits, int max_hits)
