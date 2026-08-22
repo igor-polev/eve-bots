@@ -486,7 +486,7 @@ void Cli::cmd_images() const
 		          << "  " << pattern.width() << "x" << pattern.height()
 		          << (pattern.masked() ? ", alpha mask" : ", opaque")
 		          << ", threshold " << certainty_text(pattern.threshold)
-		          << ", fixed " << fixed_directions_text(pattern.fixed_directions)
+		          << ", fixed " << ImageLibrary::fixed_directions_text(pattern.fixed_directions)
 		          << ", margines " << margines.x << "x" << margines.y;
 		if (ImageLibrary::seen(last))
 			std::cout << ", last seen at " << corner_text(last);

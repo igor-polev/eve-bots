@@ -49,7 +49,8 @@ int main()
 		// fatal as broken settings.
 		ImageLibrary images;
 		if (!images.load(
-				settings.image_dir(), settings.detect_threshold(), error))
+				settings.image_file(), settings.image_dir(),
+				settings.detect_threshold(), error))
 		{
 			std::cerr << "   [ERROR] " << error << std::endl;
 			return -1;

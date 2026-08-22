@@ -55,6 +55,8 @@ public:
 
 	// Folder with the pattern images, taken relative to the settings file.
 	const std::wstring& image_dir() const noexcept { return m_image_dir; }
+	// The library description file, looked for the same way this file was.
+	const std::wstring& image_file() const noexcept { return m_image_file; }
 	// Certainty a hit must reach when a pattern gives no threshold of its own.
 	double detect_threshold() const noexcept { return m_detect_threshold; }
 	// Invalid when the file asked for no menu.
@@ -76,7 +78,8 @@ private:
 	InputPriority   m_priority;
 	EveWindowMatch  m_eve_window;
 	unsigned        m_capture_frame_rate {0};
-	std::wstring    m_image_dir;
+	std::wstring    m_image_dir,
+	                m_image_file;
 	double          m_detect_threshold {0.0};
 	bool            m_autostart_capture {false};
 };

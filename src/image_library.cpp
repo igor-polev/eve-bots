@@ -169,12 +169,15 @@ bool prepare_pattern(const cv::Mat& raw, ImagePattern& pattern, std::string& err
 } // namespace
 
 bool ImageLibrary::load(
-	const std::wstring& dir, double default_threshold, std::string& error)
+	const std::wstring& file,
+	const std::wstring& dir,
+	double              default_threshold,
+	std::string&        error)
 {
 	std::vector<std::wstring> tried;
-	const std::wstring path = find_config_file(FILE_NAME, &tried);
+	const std::wstring path = find_config_file(file, &tried);
 	if (path.empty()) {
-		error = to_utf8(FILE_NAME) + std::string(" not found; looked in:");
+		error = to_utf8(file) + std::string(" not found; looked in:");
 		for (const std::wstring& candidate : tried)
 			error += "\n    " + to_utf8(candidate);
 		return false;
@@ -235,6 +238,7 @@ bool ImageLibrary::load_file(
 		}
 
 		ImagePattern pattern;
+		std::wstring image_file;
 		try {
 			const json& name = entry.at(KEY_NAME);
 			const json& file_name = entry.at(KEY_FILE);
@@ -244,14 +248,14 @@ bool ImageLibrary::load_file(
 				return false;
 			}
 			pattern.name = name.get<std::string>();
-			pattern.file = to_wide(file_name.get<std::string>());
+			image_file = to_wide(file_name.get<std::string>());
 		}
 		catch (const json::out_of_range&) {
 			error = where + " needs both " + KEY_NAME + " and " + KEY_FILE;
 			return false;
 		}
 
-		if (pattern.name.empty() || pattern.file.empty()) {
+		if (pattern.name.empty() || image_file.empty()) {
 			error = where + ": " + KEY_NAME + " and " + KEY_FILE
 			      + " must not be empty";
 			return false;
@@ -330,9 +334,9 @@ bool ImageLibrary::load_file(
 		}
 		named.push_back(std::move(similar));
 
-		pattern.path = join_path(dir, pattern.file);
+		const std::wstring image_path {join_path(dir, image_file)};
 		std::vector<uchar> bytes;
-		if (!read_file_bytes(pattern.path, bytes, error)) {
+		if (!read_file_bytes(image_path, bytes, error)) {
 			error = "image '" + pattern.name + "': " + error;
 			return false;
 		}
@@ -342,18 +346,18 @@ bool ImageLibrary::load_file(
 			raw = cv::imdecode(bytes, cv::IMREAD_UNCHANGED);
 		}
 		catch (const cv::Exception& e) {
-			error = "image '" + pattern.name + "' (" + to_utf8(pattern.path)
+			error = "image '" + pattern.name + "' (" + to_utf8(image_path)
 			      + "): " + e.what();
 			return false;
 		}
 		if (raw.empty()) {
 			error = "image '" + pattern.name + "': "
-			      + to_utf8(pattern.path) + " is not a readable image";
+			      + to_utf8(image_path) + " is not a readable image";
 			return false;
 		}
 		if (!prepare_pattern(raw, pattern, error)) {
 			error = "image '" + pattern.name + "' ("
-			      + to_utf8(pattern.path) + "): " + error;
+			      + to_utf8(image_path) + "): " + error;
 			return false;
 		}
 
@@ -452,12 +456,6 @@ bool ImageLibrary::link_similar(
 	return true;
 }
 
-size_t ImageLibrary::index(const std::string& name) const
-{
-	const auto found = m_index.find(name);
-	return m_index.end() == found ? NOT_FOUND : found->second;
-}
-
 std::string ImageLibrary::name_list() const
 {
 	std::string list;
@@ -476,33 +474,4 @@ std::string ImageLibrary::names_text(const eb::Images& images) const
 		text += "'" + m_patterns[images[at]].name + "'";
 	}
 	return text;
-}
-
-cv::Point ImageLibrary::last_hit(size_t image) const
-{
-	std::lock_guard<std::mutex> lock {m_hits_mutex};
-	return m_last_hits[image];
-}
-
-bool ImageLibrary::set_last_hit(size_t image, const cv::Point& corner)
-{
-	std::lock_guard<std::mutex> lock {m_hits_mutex};
-	cv::Point& hit = m_last_hits[image];
-	if (hit == corner) return false;
-	hit = corner;
-	return true;
-}
-
-void ImageLibrary::forget_hits()
-{
-	std::lock_guard<std::mutex> lock {m_hits_mutex};
-	m_last_hits.assign(m_patterns.size(), NEVER_SEEN);
-}
-
-std::string fixed_directions_text(unsigned directions)
-{
-	std::string text;
-	if (0 != (directions & FIXED_X)) text += 'X';
-	if (0 != (directions & FIXED_Y)) text += 'Y';
-	return text.empty() ? "-" : text;
 }

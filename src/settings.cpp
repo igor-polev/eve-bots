@@ -22,6 +22,7 @@ constexpr const char* KEY_WINDOW_CLASS = "EVE_WINDOW_CLASS_NAME";
 constexpr const char* KEY_TITLE_PREFIX = "EVE_WINDOW_TITLE_PREFIX";
 constexpr const char* KEY_FRAME_RATE   = "CAPTURE_FRAME_RATE_DEFAULT";
 constexpr const char* KEY_IMAGE_DIR    = "IMAGE_LIBRARY_DIR";
+constexpr const char* KEY_IMAGE_FILE   = "IMAGE_LIBRARY_FILE";
 constexpr const char* KEY_THRESHOLD    = "DETECT_THRESHOLD_DEFAULT";
 constexpr const char* KEY_MENU_HOTKEY  = "MENU_HOTKEY";
 constexpr const char* KEY_AUTOSTART    = "AUTOSTART_CAPTURE";
@@ -93,7 +94,7 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 	}
 
 	EveWindowMatch eve_window;
-	std::wstring image_dir;
+	std::wstring image_dir, image_file;
 	int64_t frame_rate      {0};
 	int64_t confirm_timeout {0};
 	int64_t wait_click      {0};
@@ -106,6 +107,7 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		eve_window.class_name   = read_string(settings, KEY_WINDOW_CLASS);
 		eve_window.title_prefix = read_string(settings, KEY_TITLE_PREFIX);
 		image_dir               = read_string(settings, KEY_IMAGE_DIR);
+		image_file              = read_string(settings, KEY_IMAGE_FILE);
 
 		const json& rate = settings.at(KEY_FRAME_RATE);
 		if (!rate.is_number_integer())
@@ -136,6 +138,7 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		      + KEY_TITLE_PREFIX + ", "
 		      + KEY_FRAME_RATE   + ", "
 		      + KEY_IMAGE_DIR    + ", "
+		      + KEY_IMAGE_FILE   + ", "
 		      + KEY_THRESHOLD    + ", "
 		      + KEY_CONFIRM_TIMEOUT + ", "
 		      + KEY_WAIT_CLICK      + ", "
@@ -245,6 +248,10 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 		error = std::string(KEY_IMAGE_DIR) + " is empty in " + to_utf8(path);
 		return false;
 	}
+	if (image_file.empty()) {
+		error = std::string(KEY_IMAGE_FILE) + " is empty in " + to_utf8(path);
+		return false;
+	}
 	m_eve_window         = std::move(eve_window);
 	m_capture_frame_rate = static_cast<unsigned>(frame_rate);
 	m_detect_threshold   = threshold;
@@ -258,6 +265,7 @@ bool Settings::load_file(const std::wstring& path, std::string& error)
 	// a relative image folder is relative to the settings file, not to the
 	// directory the app was started from
 	m_image_dir          = join_path(directory_of(path), image_dir);
+	m_image_file         = std::move(image_file);
 	m_source             = path;
 	return true;
 }
